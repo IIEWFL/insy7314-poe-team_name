@@ -6,10 +6,10 @@ import employeeAuth, { requireAdmin } from '../middleware/employeeAuth.js';
 
 const router = express.Router();
 
-// Employee registration (admin only - for pre-registering employees)
+// Employee registration (admin only for pre-registering employees)
 router.post('/register', 
-    //employeeAuth,
-    //requireAdmin,
+    employeeAuth,
+    requireAdmin,
     bruteForce.prevent,
     validateEmployeeRegistration, 
     employeeAuthController.register

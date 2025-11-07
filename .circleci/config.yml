@@ -220,6 +220,7 @@ jobs:
           root: .
           paths:
             - CustomerPortal/Backend
+# Kushchi, S. (2024) How to run a SAST Test with Bandit and, Jit. Available at: https://www.jit.io/resources/appsec-tools/how-to-run-a-sast-test-with-bandit-and-jit (Accessed: November 7, 2025).
 
   customer-backend-sast:
     executor: security-executor
@@ -256,6 +257,10 @@ jobs:
       - store_artifacts:
           path: CustomerPortal/Backend/nodejsscan-report.json
 
+# Biam, L. (2024) 7 essential steps and examples to implement SCA scanning, Jit. Available at: https://www.jit.io/resources/appsec-tools/7-tips-for-an-effective-sca-scan (Accessed: November 7, 2025).
+
+#Software composition analysis (no date) Sonarsource.com. Available at: https://www.sonarsource.com/solutions/security/sca/?utm_source=google&utm_medium=cpc&utm_campaign=SQ-EMEA-South-MEA-Nonbrand-Security&utm_content=SCA&utm_term=sca%20tools&s_campaign=21204671165&s_content=191036014751&s_category=Paid&s_source=Paid%20Search&s_origin=Google&cq_src=google_ads&cq_cmp=21204671165&cq_con=191036014751&cq_term=sca%20tools&cq_med=&cq_plac=&cq_net=g&cq_pos=&cq_plt=gp&gad_source=1&gad_campaignid=21204671165&gbraid=0AAAAAC0fKmqBXz0vePF-jJGLI_QWehILD&gclid=CjwKCAiAzrbIBhA3EiwAUBaUdeXZInY4pyf809HN4ly2RuTPWuvVZtMOpj-yeZ3K7cbVJ3aGFI0mmxoC_wIQAvD_BwE (Accessed: November 7, 2025).
+
   customer-backend-sca:
     executor: security-executor
     steps:
@@ -278,6 +283,8 @@ jobs:
       - store_artifacts:
           path: CustomerPortal/Backend/snyk-report.json
 
+ #SonarQube cloud (no date) Sonarcloud.io. Available at: https://sonarcloud.io/projects (Accessed: November 7, 2025).
+
   customer-backend-sonarqube:
     executor: sonarqube-executor
     steps:
@@ -288,6 +295,9 @@ jobs:
           project-path: "CustomerPortal/Backend"
           project-key: "customer-portal-backend"
           project-name: "Customer Portal Backend"
+
+#MongoDB up and running (2021) CircleCI Discuss. Available at: https://discuss.circleci.com/t/mongodb-up-and-running/39624 (Accessed: November 7, 2025).
+
 
   customer-backend-api-tests:
     executor: node-mongo-executor
@@ -327,7 +337,7 @@ jobs:
             sleep 10
             
             if ps -p $SERVER_PID > /dev/null; then
-              echo "✓ Server process is running"
+              echo "[PASS] Server process is running"
               
               echo "=== Testing Customer Portal Endpoints ==="
               
@@ -335,45 +345,45 @@ jobs:
               login_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/login)
               echo "   Login endpoint: HTTP $login_code"
               if [[ "$login_code" =~ ^(400|401)$ ]]; then
-                echo "   ✓ Login endpoint exists (returned $login_code - missing credentials)"
+                echo "   [PASS] Login endpoint exists (returned $login_code - missing credentials)"
               else
-                echo "   ✗ Login endpoint failed (HTTP $login_code)"
+                echo "   [FAIL] Login endpoint failed (HTTP $login_code)"
               fi
               
               echo "2. Testing /api/auth/signup..."
               signup_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/signup)
               echo "   Signup endpoint: HTTP $signup_code"
               if [[ "$signup_code" =~ ^(400)$ ]]; then
-                echo "   ✓ Signup endpoint exists (returned $signup_code - missing data)"
+                echo "   [PASS] Signup endpoint exists (returned $signup_code - missing data)"
               else
-                echo "   ✗ Signup endpoint failed (HTTP $signup_code)"
+                echo "   [FAIL] Signup endpoint failed (HTTP $signup_code)"
               fi
               
               echo "3. Testing /api/customerPayments/all..."
               payments_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerPayments/all)
               echo "   All payments: HTTP $payments_code"
               if [[ "$payments_code" =~ ^(200|404)$ ]]; then
-                echo "   ✓ Payments endpoint exists (returned $payments_code)"
+                echo "   [PASS] Payments endpoint exists (returned $payments_code)"
               else
-                echo "   ✗ Payments endpoint failed (HTTP $payments_code)"
+                echo "   [FAIL] Payments endpoint failed (HTTP $payments_code)"
               fi
               
               echo "4. Testing /api/customerPayments/status/pending..."
               status_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerPayments/status/pending)
               echo "   Status endpoint: HTTP $status_code"
               if [[ "$status_code" =~ ^(200|404)$ ]]; then
-                echo "   ✓ Status endpoint exists (returned $status_code)"
+                echo "   [PASS] Status endpoint exists (returned $status_code)"
               else
-                echo "   ✗ Status endpoint failed (HTTP $status_code)"
+                echo "   [FAIL] Status endpoint failed (HTTP $status_code)"
               fi
               
               echo "5. Testing /api/customerProfiles/me..."
               profile_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerProfiles/me)
               echo "   Profile endpoint: HTTP $profile_code"
               if [[ "$profile_code" =~ ^(401|404)$ ]]; then
-                echo "   ✓ Profile endpoint exists (returned $profile_code - needs auth)"
+                echo "   [PASS] Profile endpoint exists (returned $profile_code - needs auth)"
               else
-                echo "   ✗ Profile endpoint failed (HTTP $profile_code)"
+                echo "   [FAIL] Profile endpoint failed (HTTP $profile_code)"
               fi
               
               echo "=== Testing Security Features ==="
@@ -381,17 +391,17 @@ jobs:
               echo "6. Testing Helmet.js security headers..."
               headers=$(curl -s -I http://localhost:8000/ 2>/dev/null | head -20)
               if echo "$headers" | grep -q "X-Content-Type-Options"; then
-                echo "   ✓ Helmet security headers present"
+                echo "   [PASS] Helmet security headers present"
               else
-                echo "   ⚠ Helmet headers not detected"
+                echo "   [WARN] Helmet headers not detected"
               fi
               
               echo "7. Testing CORS configuration..."
               cors_headers=$(curl -s -I -H "Origin: http://localhost:5173" http://localhost:8000/ 2>/dev/null | grep -i "access-control")
               if echo "$cors_headers" | grep -q "access-control-allow-origin"; then
-                echo "   ✓ CORS headers present for allowed origin"
+                echo "   [PASS] CORS headers present for allowed origin"
               else
-                echo "   ⚠ CORS headers not detected"
+                echo "   [WARN] CORS headers not detected"
               fi
               
               echo "8. Testing express-brute rate limiting on /api/auth/login..."
@@ -400,14 +410,14 @@ jobs:
               for i in {1..15}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/login)
                 if [[ "$response" == "429" ]]; then
-                  echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
+                  echo "   [PASS] Rate limiting triggered on attempt $i (HTTP 429)"
                   RATE_LIMIT_TRIGGERED=true
                   break
                 fi
                 sleep 0.1
               done
               if [[ "$RATE_LIMIT_TRIGGERED" != "true" ]]; then
-                echo "   ⚠ Rate limiting not triggered within 15 attempts"
+                echo "   [WARN] Rate limiting not triggered within 15 attempts"
               fi
               
               echo "9. Testing express-brute rate limiting on /api/auth/signup..."
@@ -416,14 +426,14 @@ jobs:
               for i in {1..15}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/signup)
                 if [[ "$response" == "429" ]]; then
-                  echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
+                  echo "   [PASS] Rate limiting triggered on attempt $i (HTTP 429)"
                   RATE_LIMIT_TRIGGERED_SIGNUP=true
                   break
                 fi
                 sleep 0.1
               done
               if [[ "$RATE_LIMIT_TRIGGERED_SIGNUP" != "true" ]]; then
-                echo "   ⚠ Rate limiting not triggered within 15 attempts"
+                echo "   [WARN] Rate limiting not triggered within 15 attempts"
               fi
               
               echo "10. Testing express-rate-limit global rate limiting..."
@@ -432,14 +442,14 @@ jobs:
               for i in {1..120}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/)
                 if [[ "$response" == "429" ]]; then
-                  echo "    ✓ Global rate limiting triggered on attempt $i (HTTP 429)"
+                  echo "    [PASS] Global rate limiting triggered on attempt $i (HTTP 429)"
                   GLOBAL_LIMIT_TRIGGERED=true
                   break
                 fi
                 sleep 0.05
               done
               if [[ "$GLOBAL_LIMIT_TRIGGERED" != "true" ]]; then
-                echo "    ⚠ Global rate limiting not triggered within 120 attempts"
+                echo "    [WARN] Global rate limiting not triggered within 120 attempts"
               fi
               
               echo "11. Testing express-validator input validation..."
@@ -450,42 +460,42 @@ jobs:
               
               status_code="${validation_response: -3}"
               if [[ "$status_code" == "400" ]]; then
-                echo "   ✓ Input validation working (rejected invalid email/password)"
+                echo "   [PASS] Input validation working (rejected invalid email/password)"
               else
-                echo "   ⚠ Input validation may not be working properly"
+                echo "   [WARN] Input validation may not be working properly"
               fi
               
               echo "12. Testing JWT authentication on protected routes..."
               protected_response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerProfiles/me)
               if [[ "$protected_response" == "401" ]]; then
-                echo "   ✓ JWT authentication required for protected routes"
+                echo "   [PASS] JWT authentication required for protected routes"
               else
-                echo "   ⚠ JWT authentication may not be enforced"
+                echo "   [WARN] JWT authentication may not be enforced"
               fi
               
               echo "13. Testing NoSQL injection protection..."
               injection_response=$(curl -s -o /dev/null -w "%{http_code}" \
                 "http://localhost:8000/api/customerPayments/all?\$where=1")
               if [[ "$injection_response" != "500" ]]; then
-                echo "   ✓ NoSQL injection protection appears active"
+                echo "   [PASS] NoSQL injection protection appears active"
               else
-                echo "   ⚠ Potential NoSQL injection vulnerability"
+                echo "   [WARN] Potential NoSQL injection vulnerability"
               fi
               
               echo "=== Customer Portal Security Summary ==="
-              echo "✓ Helmet.js: Security headers"
-              echo "✓ CORS: Cross-origin protection"
-              echo "✓ express-brute: Login/signup rate limiting"
-              echo "✓ express-rate-limit: Global rate limiting"
-              echo "✓ express-validator: Input validation"
-              echo "✓ JWT: Authentication protection"
-              echo "✓ MongoDB: NoSQL injection protection"
+              echo "[SECURITY] Helmet.js: Security headers"
+              echo "[SECURITY] CORS: Cross-origin protection"
+              echo "[SECURITY] express-brute: Login/signup rate limiting"
+              echo "[SECURITY] express-rate-limit: Global rate limiting"
+              echo "[SECURITY] express-validator: Input validation"
+              echo "[SECURITY] JWT: Authentication protection"
+              echo "[SECURITY] MongoDB: NoSQL injection protection"
               
               kill $SERVER_PID
               echo "Server stopped"
               exit 0
             else
-              echo "✗ Server process died"
+              echo "[FAIL] Server process died"
               exit 1
             fi
       - store_artifacts:
@@ -641,7 +651,7 @@ jobs:
             sleep 10
             
             if ps -p $SERVER_PID > /dev/null; then
-              echo "✓ Server process is running"
+              echo "[PASS] Server process is running"
               
               echo "=== Testing Employee Portal Endpoints ==="
               
@@ -649,45 +659,45 @@ jobs:
               login_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/login)
               echo "   Login endpoint: HTTP $login_code"
               if [[ "$login_code" =~ ^(400|401)$ ]]; then
-                echo "   ✓ Login endpoint exists (returned $login_code - missing credentials)"
+                echo "   [PASS] Login endpoint exists (returned $login_code - missing credentials)"
               else
-                echo "   ✗ Login endpoint failed (HTTP $login_code)"
+                echo "   [FAIL] Login endpoint failed (HTTP $login_code)"
               fi
               
               echo "2. Testing /api/employee/auth/register..."
               register_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/register)
               echo "   Register endpoint: HTTP $register_code"
               if [[ "$register_code" =~ ^(400|401|403)$ ]]; then
-                echo "   ✓ Register endpoint exists (returned $register_code)"
+                echo "   [PASS] Register endpoint exists (returned $register_code)"
               else
-                echo "   ✗ Register endpoint failed (HTTP $register_code)"
+                echo "   [FAIL] Register endpoint failed (HTTP $register_code)"
               fi
               
               echo "3. Testing /api/employee/profile/me..."
               profile_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/profile/me)
               echo "   Profile endpoint: HTTP $profile_code"
               if [[ "$profile_code" =~ ^(401|404)$ ]]; then
-                echo "   ✓ Profile endpoint exists (returned $profile_code - needs auth)"
+                echo "   [PASS] Profile endpoint exists (returned $profile_code - needs auth)"
               else
-                echo "   ✗ Profile endpoint failed (HTTP $profile_code)"
+                echo "   [FAIL] Profile endpoint failed (HTTP $profile_code)"
               fi
               
               echo "4. Testing /api/employee/verification/pending-payments..."
               pending_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/verification/pending-payments)
               echo "   Pending payments: HTTP $pending_code"
               if [[ "$pending_code" =~ ^(401|404)$ ]]; then
-                echo "   ✓ Verification endpoint exists (returned $pending_code - needs auth)"
+                echo "   [PASS] Verification endpoint exists (returned $pending_code - needs auth)"
               else
-                echo "   ✗ Verification endpoint failed (HTTP $pending_code)"
+                echo "   [FAIL] Verification endpoint failed (HTTP $pending_code)"
               fi
               
               echo "5. Testing /api/employee/verification/payments..."
               payments_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/verification/payments)
               echo "   All payments: HTTP $payments_code"
               if [[ "$payments_code" =~ ^(401|404)$ ]]; then
-                echo "   ✓ Payments endpoint exists (returned $payments_code - needs auth)"
+                echo "   [PASS] Payments endpoint exists (returned $payments_code - needs auth)"
               else
-                echo "   ✗ Payments endpoint failed (HTTP $payments_code)"
+                echo "   [FAIL] Payments endpoint failed (HTTP $payments_code)"
               fi
               
               echo "=== Testing Security Features ==="
@@ -695,17 +705,17 @@ jobs:
               echo "6. Testing Helmet.js security headers..."
               headers=$(curl -s -I http://localhost:8001/ 2>/dev/null | head -20)
               if echo "$headers" | grep -q "X-Content-Type-Options"; then
-                echo "   ✓ Helmet security headers present"
+                echo "   [PASS] Helmet security headers present"
               else
-                echo "   ⚠ Helmet headers not detected"
+                echo "   [WARN] Helmet headers not detected"
               fi
               
               echo "7. Testing CORS configuration..."
               cors_headers=$(curl -s -I -H "Origin: http://localhost:5174" http://localhost:8001/ 2>/dev/null | grep -i "access-control")
               if echo "$cors_headers" | grep -q "access-control-allow-origin"; then
-                echo "   ✓ CORS headers present for allowed origin"
+                echo "   [PASS] CORS headers present for allowed origin"
               else
-                echo "   ⚠ CORS headers not detected"
+                echo "   [WARN] CORS headers not detected"
               fi
               
               echo "8. Testing express-brute rate limiting on /api/employee/auth/login..."
@@ -714,14 +724,14 @@ jobs:
               for i in {1..15}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/login)
                 if [[ "$response" == "429" ]]; then
-                  echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
+                  echo "   [PASS] Rate limiting triggered on attempt $i (HTTP 429)"
                   RATE_LIMIT_TRIGGERED=true
                   break
                 fi
                 sleep 0.1
               done
               if [[ "$RATE_LIMIT_TRIGGERED" != "true" ]]; then
-                echo "   ⚠ Rate limiting not triggered within 15 attempts"
+                echo "   [WARN] Rate limiting not triggered within 15 attempts"
               fi
               
               echo "9. Testing express-brute rate limiting on /api/employee/auth/register..."
@@ -730,14 +740,14 @@ jobs:
               for i in {1..15}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/register)
                 if [[ "$response" == "429" ]]; then
-                  echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
+                  echo "   [PASS] Rate limiting triggered on attempt $i (HTTP 429)"
                   RATE_LIMIT_TRIGGERED_REGISTER=true
                   break
                 fi
                 sleep 0.1
               done
               if [[ "$RATE_LIMIT_TRIGGERED_REGISTER" != "true" ]]; then
-                echo "   ⚠ Rate limiting not triggered within 15 attempts"
+                echo "   [WARN] Rate limiting not triggered within 15 attempts"
               fi
               
               echo "10. Testing express-rate-limit global rate limiting..."
@@ -746,14 +756,14 @@ jobs:
               for i in {1..120}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/)
                 if [[ "$response" == "429" ]]; then
-                  echo "    ✓ Global rate limiting triggered on attempt $i (HTTP 429)"
+                  echo "    [PASS] Global rate limiting triggered on attempt $i (HTTP 429)"
                   GLOBAL_LIMIT_TRIGGERED=true
                   break
                 fi
                 sleep 0.05
               done
               if [[ "$GLOBAL_LIMIT_TRIGGERED" != "true" ]]; then
-                echo "    ⚠ Global rate limiting not triggered within 120 attempts"
+                echo "    [WARN] Global rate limiting not triggered within 120 attempts"
               fi
               
               echo "11. Testing express-validator input validation..."
@@ -764,41 +774,41 @@ jobs:
               
               status_code="${validation_response: -3}"
               if [[ "$status_code" == "400" ]]; then
-                echo "   ✓ Input validation working (rejected invalid employee data)"
+                echo "   [PASS] Input validation working (rejected invalid employee data)"
               else
-                echo "   ⚠ Input validation may not be working properly"
+                echo "   [WARN] Input validation may not be working properly"
               fi
               
               echo "12. Testing JWT authentication on protected routes..."
               protected_response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/profile/me)
               if [[ "$protected_response" == "401" ]]; then
-                echo "   ✓ JWT authentication required for protected routes"
+                echo "   [PASS] JWT authentication required for protected routes"
               else
-                echo "   ⚠ JWT authentication may not be enforced"
+                echo "   [WARN] JWT authentication may not be enforced"
               fi
               
               echo "13. Testing Role-Based Access Control..."
               admin_response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/profile/)
               if [[ "$admin_response" == "401" || "$admin_response" == "403" ]]; then
-                echo "   ✓ RBAC protection active for admin routes"
+                echo "   [PASS] RBAC protection active for admin routes"
               else
-                echo "   ⚠ RBAC may not be properly enforced"
+                echo "   [WARN] RBAC may not be properly enforced"
               fi
               
               echo "=== Employee Portal Security Summary ==="
-              echo "✓ Helmet.js: Security headers"
-              echo "✓ CORS: Cross-origin protection"
-              echo "✓ express-brute: Login/register rate limiting"
-              echo "✓ express-rate-limit: Global rate limiting"
-              echo "✓ express-validator: Input validation"
-              echo "✓ JWT: Authentication protection"
-              echo "✓ RBAC: Role-based access control"
+              echo "[SECURITY] Helmet.js: Security headers"
+              echo "[SECURITY] CORS: Cross-origin protection"
+              echo "[SECURITY] express-brute: Login/register rate limiting"
+              echo "[SECURITY] express-rate-limit: Global rate limiting"
+              echo "[SECURITY] express-validator: Input validation"
+              echo "[SECURITY] JWT: Authentication protection"
+              echo "[SECURITY] RBAC: Role-based access control"
               
               kill $SERVER_PID
               echo "Server stopped"
               exit 0
             else
-              echo "✗ Server process died"
+              echo "[FAIL] Server process died"
               exit 1
             fi
       - store_artifacts:
