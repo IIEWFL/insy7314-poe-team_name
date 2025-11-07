@@ -22,20 +22,21 @@ jobs:
         with:
           node-version: '20'
       
-      - name: Install Customer Backend Dependencies and Run Audit
+      - name: Install Customer Backend Dependencies with Legacy Peer Deps
         working-directory: CustomerPortal/Backend
         run: |
           echo "Installing dependencies for Customer Portal Backend..."
           if [ -f "package.json" ]; then
-            npm ci
+            # Use --legacy-peer-deps to resolve Express 4.x vs 5.x conflict
+            npm ci --legacy-peer-deps
             echo "Running npm audit for Customer Portal..."
-            npm audit --json > npm-audit-customer.json 2>&1 || echo '{"error": "npm audit failed or no vulnerabilities"}' > npm-audit-customer.json
+            npm audit --json --legacy-peer-deps > npm-audit-customer.json 2>&1 || echo '{"error": "npm audit failed or no vulnerabilities"}' > npm-audit-customer.json
           else
             echo "package.json not found in CustomerPortal/Backend"
             echo '{"error": "No package.json found"}' > npm-audit-customer.json
           fi
       
-      - name: Install Employee Backend Dependencies and Run Audit
+      - name: Install Employee Backend Dependencies
         working-directory: EmployeePortal/Backend
         run: |
           echo "Installing dependencies for Employee Portal Backend..."
