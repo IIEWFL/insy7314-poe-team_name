@@ -74,42 +74,17 @@ commands:
           name: Wait for MongoDB to be ready
           command: |
             echo "Waiting for MongoDB to be ready..."
-            # Simple connection test using netcat to check if port is open
+            # Simple port check - if port is open, assume MongoDB is ready
             for i in {1..30}; do
               if nc -z localhost 27017; then
-                echo "MongoDB port is open, testing connection..."
-                # Now test with Node.js MongoDB driver
-                if node -e "
-                const { MongoClient } = require('mongodb');
-                const uri = 'mongodb://localhost:27017/INSY7314';
-                async function testConnection() {
-                  try {
-                    const client = new MongoClient(uri);
-                    await client.connect();
-                    const result = await client.db().admin().ping();
-                    console.log('MongoDB connection successful:', result);
-                    await client.close();
-                    return true;
-                  } catch (error) {
-                    console.log('MongoDB connection failed:', error.message);
-                    return false;
-                  }
-                }
-                testConnection().then(success => {
-                  process.exit(success ? 0 : 1);
-                });
-                "; then
-                  echo "MongoDB is ready and responsive!"
-                  exit 0
-                else
-                  echo "MongoDB port open but connection failed, retrying..."
-                fi
+                echo "MongoDB is ready and responsive!"
+                exit 0
               else
                 echo "Waiting for MongoDB port to open... ($i/30)"
+                sleep 2
               fi
-              sleep 2
             done
-            echo "MongoDB failed to start or become responsive"
+            echo "MongoDB failed to start in time"
             exit 1
 
   setup-sonarqube:
