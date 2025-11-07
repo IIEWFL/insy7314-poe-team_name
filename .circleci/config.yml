@@ -60,7 +60,6 @@ commands:
           name: Install Dependencies
           command: |
             cd << parameters.project-path >>
-            # Use npm install instead of npm ci to handle lock file issues
             npm install --legacy-peer-deps
       - save_cache:
           key: v1-deps-<< parameters.project-path >>-{{ checksum "<< parameters.project-path >>/package-lock.json" }}
@@ -74,7 +73,6 @@ commands:
           name: Wait for MongoDB to be ready
           command: |
             echo "Waiting for MongoDB to be ready..."
-            # Simple port check - if port is open, assume MongoDB is ready
             for i in {1..30}; do
               if nc -z localhost 27017; then
                 echo "MongoDB is ready and responsive!"
@@ -201,7 +199,6 @@ jobs:
           command: |
             npm install -g snyk
             cd CustomerPortal/Backend
-            # Snyk will fail if no token, but continue anyway
             snyk test --json > snyk-report.json 2>/dev/null || echo "Snyk test completed (auth may be required)"
       - store_artifacts:
           path: CustomerPortal/Backend/npm-audit-report.json
@@ -231,7 +228,6 @@ jobs:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            # Use local MongoDB for CI testing
             echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
             echo "PORT=8000" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
@@ -239,7 +235,6 @@ jobs:
       - run:
           name: Check if port 8000 is available
           command: |
-            # Check if port 8000 is already in use
             if nc -z localhost 8000; then
               echo "Port 8000 is already in use, attempting to free it..."
               pkill -f "node.*8000" || true
@@ -249,16 +244,14 @@ jobs:
           name: Start Customer Backend Server with logging
           command: |
             cd CustomerPortal/Backend
-            # Start server with output logging and capture PID
             npm start > server.log 2>&1 &
             echo $! > server.pid
             echo "Server started with PID: $(cat server.pid)"
           background: true
       - run:
-          name: Wait for Server to Start with better debugging
+          name: Wait for Server to Start
           command: |
             for i in {1..30}; do
-              # Check if server process is still running
               if [ ! -f CustomerPortal/Backend/server.pid ] || ! ps -p $(cat CustomerPortal/Backend/server.pid) > /dev/null 2>&1; then
                 echo "Server process died, checking logs..."
                 cat CustomerPortal/Backend/server.log || true
@@ -266,19 +259,14 @@ jobs:
                 exit 1
               fi
               
-              # Check if server is responding - try multiple endpoints
-              if curl -s http://localhost:8000 > /dev/null || \
-                 curl -s http://localhost:8000/api > /dev/null || \
-                 curl -s http://localhost:8000/api/customer > /dev/null; then
-                echo "Server is ready and responding"
+              if curl -f -s http://localhost:8000 > /dev/null 2>&1; then
+                echo "Server root endpoint is responding"
                 exit 0
               fi
               
-              # Show recent server logs for debugging
-              if [ $i -eq 10 ] || [ $i -eq 20 ]; then
-                echo "--- Server logs at attempt $i ---"
-                tail -20 CustomerPortal/Backend/server.log || true
-                echo "--------------------------------"
+              if curl -s http://localhost:8000/api > /dev/null 2>&1; then
+                echo "Server API endpoint is responding"
+                exit 0
               fi
               
               echo "Waiting for server... ($i/30)"
@@ -291,29 +279,25 @@ jobs:
             echo "-------------------------"
             exit 1
       - run:
-          name: Run Basic API Tests
+          name: Test Actual API Endpoints
           command: |
             echo "Testing customer API endpoints..."
-            # Try multiple possible endpoints
-            for endpoint in "/" "/api" "/api/customer"; do
-              response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000$endpoint" || echo "500")
-              if [ "$response" = "200" ] || [ "$response" = "404" ] || [ "$response" = "401" ]; then
-                echo "Customer API endpoint $endpoint: RESPONDING (Status: $response)"
-                break
-              else
-                echo "Customer API endpoint $endpoint: NOT RESPONDING (Status: $response)"
-              fi
-            done
             
-            # If we get any response, consider it a success for now
-            if curl -s http://localhost:8000 > /dev/null || \
-               curl -s http://localhost:8000/api > /dev/null || \
-               curl -s http://localhost:8000/api/customer > /dev/null; then
-              echo "Customer API health check: PASSED - Server is responding"
+            if curl -s http://localhost:8000 > /dev/null; then
+              echo "✓ Server is running and responding on root endpoint"
             else
-              echo "Customer API health check: FAILED - No endpoints responding"
-              # Show more details about the failure
-              curl -v http://localhost:8000 || true
+              echo "✗ Server root endpoint not responding"
+              exit 1
+            fi
+            
+            response_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api)
+            echo "API endpoint /api returned HTTP $response_code"
+            
+            if [ "$response_code" != "000" ]; then
+              echo "✓ API endpoint is responding (HTTP $response_code)"
+            else
+              echo "✗ API endpoint not responding"
+              exit 1
             fi
       - run:
           name: Stop Server and cleanup
@@ -323,12 +307,10 @@ jobs:
               echo "Stopping server with PID $(cat server.pid)"
               kill $(cat server.pid) 2>/dev/null || true
               sleep 2
-              # Force kill if still running
               kill -9 $(cat server.pid) 2>/dev/null || true
               rm -f server.pid
               echo "Server stopped"
             fi
-            # Show final logs for debugging
             echo "--- Final server logs ---"
             cat server.log 2>/dev/null || echo "No server logs found"
       - store_artifacts:
@@ -430,7 +412,6 @@ jobs:
           command: |
             npm install -g snyk
             cd EmployeePortal/Backend
-            # Snyk will fail if no token, but continue anyway
             snyk test --json > snyk-report.json 2>/dev/null || echo "Snyk test completed (auth may be required)"
       - store_artifacts:
           path: EmployeePortal/Backend/npm-audit-report.json
@@ -460,7 +441,6 @@ jobs:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            # Use local MongoDB for CI testing
             echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
             echo "PORT=8001" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
@@ -468,7 +448,6 @@ jobs:
       - run:
           name: Check if port 8001 is available
           command: |
-            # Check if port 8001 is already in use
             if nc -z localhost 8001; then
               echo "Port 8001 is already in use, attempting to free it..."
               pkill -f "node.*8001" || true
@@ -478,16 +457,14 @@ jobs:
           name: Start Employee Backend Server with logging
           command: |
             cd EmployeePortal/Backend
-            # Start server with output logging and capture PID
             npm start > server.log 2>&1 &
             echo $! > server.pid
             echo "Server started with PID: $(cat server.pid)"
           background: true
       - run:
-          name: Wait for Server to Start with better debugging
+          name: Wait for Server to Start
           command: |
             for i in {1..30}; do
-              # Check if server process is still running
               if [ ! -f EmployeePortal/Backend/server.pid ] || ! ps -p $(cat EmployeePortal/Backend/server.pid) > /dev/null 2>&1; then
                 echo "Server process died, checking logs..."
                 cat EmployeePortal/Backend/server.log || true
@@ -495,18 +472,14 @@ jobs:
                 exit 1
               fi
               
-              # Check if server is responding - try multiple endpoints including the one you actually have
-              if curl -s http://localhost:8001 > /dev/null || \
-                 curl -s http://localhost:8001/api/employee > /dev/null; then
-                echo "Server is ready and responding"
+              if curl -f -s http://localhost:8001 > /dev/null 2>&1; then
+                echo "Server root endpoint is responding"
                 exit 0
               fi
               
-              # Show recent server logs for debugging
-              if [ $i -eq 10 ] || [ $i -eq 20 ]; then
-                echo "--- Server logs at attempt $i ---"
-                tail -20 EmployeePortal/Backend/server.log || true
-                echo "--------------------------------"
+              if curl -s http://localhost:8001/api/employee > /dev/null 2>&1; then
+                echo "Server API endpoint is responding"
+                exit 0
               fi
               
               echo "Waiting for server... ($i/30)"
@@ -519,31 +492,25 @@ jobs:
             echo "-------------------------"
             exit 1
       - run:
-          name: Run Basic API Tests
+          name: Test Actual API Endpoints
           command: |
             echo "Testing employee API endpoints..."
-            # Try multiple possible endpoints - focus on the one you actually have
-            for endpoint in "/" "/api/employee"; do
-              response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8001$endpoint" || echo "500")
-              echo "Employee API endpoint $endpoint: HTTP $response"
-              
-              # Consider 200, 404, 401, etc. as "server is responding"
-              if [ "$response" != "500" ] && [ "$response" != "000" ]; then
-                echo "Employee API endpoint $endpoint: RESPONDING (Status: $response)"
-                break
-              fi
-            done
             
-            # If we get any response from your actual endpoint, consider it a success
-            if curl -s http://localhost:8001/api/employee > /dev/null; then
-              echo "Employee API health check: PASSED - Server is responding"
-            elif curl -s http://localhost:8001 > /dev/null; then
-              echo "Employee API health check: PASSED - Root endpoint responding"
+            if curl -s http://localhost:8001 > /dev/null; then
+              echo "✓ Server is running and responding on root endpoint"
             else
-              echo "Employee API health check: FAILED - No endpoints responding"
-              # Show more details about the failure
-              echo "Testing actual endpoint:"
-              curl -v http://localhost:8001/api/employee || true
+              echo "✗ Server root endpoint not responding"
+              exit 1
+            fi
+            
+            response_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee)
+            echo "API endpoint /api/employee returned HTTP $response_code"
+            
+            if [ "$response_code" != "000" ]; then
+              echo "✓ API endpoint is responding (HTTP $response_code)"
+            else
+              echo "✗ API endpoint not responding"
+              exit 1
             fi
       - run:
           name: Stop Server and cleanup
@@ -553,12 +520,10 @@ jobs:
               echo "Stopping server with PID $(cat server.pid)"
               kill $(cat server.pid) 2>/dev/null || true
               sleep 2
-              # Force kill if still running
               kill -9 $(cat server.pid) 2>/dev/null || true
               rm -f server.pid
               echo "Server stopped"
             fi
-            # Show final logs for debugging
             echo "--- Final server logs ---"
             cat server.log 2>/dev/null || echo "No server logs found"
       - store_artifacts:
