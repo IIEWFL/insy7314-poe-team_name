@@ -73,26 +73,26 @@ commands:
           name: Wait for MongoDB to be ready
           command: |
             echo "Waiting for MongoDB to be ready..."
-            # In CircleCI Docker executor, containers are accessible via localhost on different ports
-            # The MongoDB container should be accessible via localhost:27017
+            # Use the MongoDB Node.js driver to test connection
             for i in {1..30}; do
-              # Try connecting using Node.js MongoDB driver directly
               if node -e "
               const { MongoClient } = require('mongodb');
               async function test() {
                 try {
-                  const client = new MongoClient('mongodb://localhost:27017/test');
+                  const client = new MongoClient('mongodb://localhost:27017/INSY7314');
                   await client.connect();
                   await client.db().admin().ping();
                   await client.close();
+                  console.log('MongoDB is ready!');
                   process.exit(0);
                 } catch (err) {
+                  console.log('MongoDB not ready yet:', err.message);
                   process.exit(1);
                 }
               }
               test();
-              " > /dev/null 2>&1; then
-                echo "MongoDB is ready!"
+              " 2>/dev/null; then
+                echo "MongoDB connection successful!"
                 exit 0
               fi
               echo "Waiting for MongoDB... ($i/30)"
@@ -245,8 +245,8 @@ jobs:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            # Create .env file using echo commands - use localhost for MongoDB
-            echo "MONGODB_URI=mongodb://localhost:27017/test_customer_portal" > .env
+            # Use local MongoDB for CI testing
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
             echo "PORT=8000" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
@@ -407,8 +407,8 @@ jobs:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            # Create .env file using echo commands - use localhost for MongoDB
-            echo "MONGODB_URI=mongodb://localhost:27017/test_employee_portal" > .env
+            # Use local MongoDB for CI testing
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
             echo "PORT=8001" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
