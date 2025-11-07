@@ -179,8 +179,8 @@ jobs:
               echo "=== Testing Customer Portal Endpoints ==="
               
               # Test 1: Customer Auth endpoints (should return 400 for missing data)
-              echo "1. Testing /api/customer/auth/login..."
-              login_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/customer/auth/login)
+              echo "1. Testing /api/auth/login..."
+              login_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/login)
               echo "   Login endpoint: HTTP $login_code"
               if [[ "$login_code" =~ ^(400|401)$ ]]; then
                 echo "   ✓ Login endpoint exists (returned $login_code - missing credentials)"
@@ -188,8 +188,8 @@ jobs:
                 echo "   ✗ Login endpoint failed (HTTP $login_code)"
               fi
               
-              echo "2. Testing /api/customer/auth/signup..."
-              signup_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/customer/auth/signup)
+              echo "2. Testing /api/auth/signup..."
+              signup_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/signup)
               echo "   Signup endpoint: HTTP $signup_code"
               if [[ "$signup_code" =~ ^(400)$ ]]; then
                 echo "   ✓ Signup endpoint exists (returned $signup_code - missing data)"
@@ -198,8 +198,8 @@ jobs:
               fi
               
               # Test 2: Customer Payment endpoints
-              echo "3. Testing /api/customer/customerPayments/all..."
-              payments_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customer/customerPayments/all)
+              echo "3. Testing /api/customerPayments/all..."
+              payments_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerPayments/all)
               echo "   All payments: HTTP $payments_code"
               if [[ "$payments_code" =~ ^(200|404)$ ]]; then
                 echo "   ✓ Payments endpoint exists (returned $payments_code)"
@@ -207,8 +207,8 @@ jobs:
                 echo "   ✗ Payments endpoint failed (HTTP $payments_code)"
               fi
               
-              echo "4. Testing /api/customer/customerPayments/status/pending..."
-              status_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customer/customerPayments/status/pending)
+              echo "4. Testing /api/customerPayments/status/pending..."
+              status_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerPayments/status/pending)
               echo "   Status endpoint: HTTP $status_code"
               if [[ "$status_code" =~ ^(200|404)$ ]]; then
                 echo "   ✓ Status endpoint exists (returned $status_code)"
@@ -217,8 +217,8 @@ jobs:
               fi
               
               # Test 3: Customer Profile endpoints (should return 401 without auth)
-              echo "5. Testing /api/customer/customerProfiles/me..."
-              profile_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customer/customerProfiles/me)
+              echo "5. Testing /api/customerProfiles/me..."
+              profile_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerProfiles/me)
               echo "   Profile endpoint: HTTP $profile_code"
               if [[ "$profile_code" =~ ^(401|404)$ ]]; then
                 echo "   ✓ Profile endpoint exists (returned $profile_code - needs auth)"
