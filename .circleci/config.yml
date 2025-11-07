@@ -8,23 +8,28 @@ jobs:
     working_directory: ~/project
     steps:
       - checkout
+
       - run:
           name: Install dependencies
           command: |
             cd EmployeePortal/Backend
             npm install
+
       - run:
           name: Wait for MongoDB
           command: |
+            echo "Waiting for MongoDB to be ready..."
             for i in {1..30}; do
               if nc -z localhost 27017; then
                 echo "MongoDB is ready!"
                 exit 0
               fi
+              echo "MongoDB not ready yet ($i/30)"
               sleep 2
             done
             echo "MongoDB failed to start"
             exit 1
+
       - run:
           name: Debug - Show server.js content
           command: |
@@ -32,49 +37,60 @@ jobs:
             echo "=== server.js CONTENT ==="
             cat server.js
             echo "=== END server.js ==="
+
       - run:
-          name: Create test environment
+          name: Start server, test API, and cleanup
           command: |
             cd EmployeePortal/Backend
-            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
-            echo "PORT=8001" >> .env
-            echo "JWT_SECRET=test" >> .env
-            echo "USE_HTTPS=false" >> .env
-      - run:
-          name: Kill anything on port 8001
-          command: |
-            pkill -f "node.*8001" || true
-            sleep 2
-      - run:
-          name: Try to start server
-          command: |
-            cd EmployeePortal/Backend
+
+            # Create .env for testing
+            cat <<EOT > .env
+            MONGODB_URI=mongodb://localhost:27017/INSY7314
+            PORT=8001
+            JWT_SECRET=test
+            USE_HTTPS=false
+            EOT
+            echo ".env created:"
+            cat .env
+
+            # Kill any lingering process on port 8001
+            if nc -z localhost 8001; then
+              echo "Port 8001 is in use. Killing processes..."
+              fuser -k 8001/tcp || true
+              sleep 2
+            fi
+
+            # Start server in background and log output
             echo "=== Starting server ==="
-            node server.js &
+            node server.js > server.log 2>&1 &
             SERVER_PID=$!
             echo $SERVER_PID > server.pid
             echo "Server started with PID: $SERVER_PID"
-            sleep 5
-      - run:
-          name: Check server status
-          command: |
-            cd EmployeePortal/Backend
-            echo "=== Checking if server process is alive ==="
-            if ps -p $(cat server.pid) > /dev/null 2>&1; then
-              echo "✓ Server process is running"
-              echo "=== Testing endpoints ==="
-              curl -s http://localhost:8001/api/employee > /dev/null && echo "✓ API endpoint responding" || echo "✗ API endpoint not responding"
-              curl -s http://localhost:8001/ > /dev/null && echo "✓ Root endpoint responding" || echo "✗ Root endpoint not responding"
-            else
-              echo "✗ Server process died immediately"
-              echo "=== Checking Node error ==="
-              # Try to run server directly to see the error
-              node server.js || echo "Node execution failed"
-            fi
-      - run:
-          name: Cleanup
-          command: |
-            pkill -f "node.*8001" || true
+
+            # Wait for server to become responsive
+            for i in {1..30}; do
+              if curl -s http://localhost:8001/api/employee > /dev/null; then
+                echo "Server is responding on /api/employee"
+                break
+              fi
+              echo "Waiting for server to start... ($i/30)"
+              sleep 2
+            done
+
+            # Test endpoints
+            echo "=== Running API tests ==="
+            curl -s http://localhost:8001/api/employee > /dev/null && echo "✓ API endpoint responding" || echo "✗ API endpoint not responding"
+            curl -s http://localhost:8001/ > /dev/null && echo "✓ Root endpoint responding" || echo "✗ Root endpoint not responding"
+
+            # Output server logs for debugging
+            echo "=== Server logs ==="
+            tail -20 server.log
+
+            # Cleanup
+            echo "=== Cleaning up ==="
+            kill $SERVER_PID || true
+            rm -f server.pid
+            echo "Server stopped"
 
 workflows:
   version: 2
