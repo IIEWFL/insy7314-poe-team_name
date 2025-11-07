@@ -8,13 +8,19 @@ jobs:
     working_directory: ~/project
     steps:
       - checkout
+      - restore_cache:
+          keys:
+            - v1-deps-EmployeePortal/Backend-{{ checksum "EmployeePortal/Backend/package-lock.json" }}
+            - v1-deps-EmployeePortal/Backend-
       - run:
-          name: Install ALL missing dependencies
+          name: Install dependencies from package.json
           command: |
             cd EmployeePortal/Backend
-            # Install all the missing dependencies your code actually uses
-            npm install express-validator express-brute
             npm install
+      - save_cache:
+          key: v1-deps-EmployeePortal/Backend-{{ checksum "EmployeePortal/Backend/package-lock.json" }}
+          paths:
+            - EmployeePortal/Backend/node_modules
       - run:
           name: Wait for MongoDB
           command: |
@@ -72,13 +78,19 @@ jobs:
     working_directory: ~/project
     steps:
       - checkout
+      - restore_cache:
+          keys:
+            - v1-deps-CustomerPortal/Backend-{{ checksum "CustomerPortal/Backend/package-lock.json" }}
+            - v1-deps-CustomerPortal/Backend-
       - run:
-          name: Install ALL missing dependencies
+          name: Install dependencies from package.json
           command: |
             cd CustomerPortal/Backend
-            # Install all the missing dependencies your code actually uses
-            npm install express-validator express-brute
             npm install
+      - save_cache:
+          key: v1-deps-CustomerPortal/Backend-{{ checksum "CustomerPortal/Backend/package-lock.json" }}
+          paths:
+            - CustomerPortal/Backend/node_modules
       - run:
           name: Wait for MongoDB
           command: |
