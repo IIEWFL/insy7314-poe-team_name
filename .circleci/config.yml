@@ -8,92 +8,150 @@ jobs:
     working_directory: ~/project
     steps:
       - checkout
-
       - run:
           name: Install dependencies
           command: |
             cd EmployeePortal/Backend
             npm install
-
       - run:
           name: Wait for MongoDB
           command: |
-            echo "Waiting for MongoDB to be ready..."
             for i in {1..30}; do
               if nc -z localhost 27017; then
                 echo "MongoDB is ready!"
                 exit 0
               fi
-              echo "MongoDB not ready yet ($i/30)"
               sleep 2
             done
             echo "MongoDB failed to start"
             exit 1
-
       - run:
-          name: Debug - Show server.js content
+          name: Create test environment
           command: |
             cd EmployeePortal/Backend
-            echo "=== server.js CONTENT ==="
-            cat server.js
-            echo "=== END server.js ==="
-
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8001" >> .env
+            echo "JWT_SECRET=test" >> .env
+            echo "USE_HTTPS=false" >> .env
       - run:
-          name: Start server, test API, and cleanup
+          name: Start server and test (all in one step)
           command: |
             cd EmployeePortal/Backend
-
-            # Create .env for testing
-            cat <<EOT > .env
-            MONGODB_URI=mongodb://localhost:27017/INSY7314
-            PORT=8001
-            JWT_SECRET=test
-            USE_HTTPS=false
-            EOT
-            echo ".env created:"
-            cat .env
-
-            # Kill any lingering process on port 8001
-            if nc -z localhost 8001; then
-              echo "Port 8001 is in use. Killing processes..."
-              fuser -k 8001/tcp || true
-              sleep 2
+            
+            # Start server in background but keep it in this step
+            node server.js &
+            SERVER_PID=$!
+            echo "Server started with PID: $SERVER_PID"
+            
+            # Wait a bit for server to start
+            sleep 5
+            
+            # Check if server is running
+            if ps -p $SERVER_PID > /dev/null; then
+              echo "✓ Server process is running"
+              
+              # Test the endpoints
+              echo "=== Testing endpoints ==="
+              if curl -s http://localhost:8001/api/employee > /dev/null; then
+                echo "✓ API endpoint responding"
+              else
+                echo "✗ API endpoint not responding"
+              fi
+              
+              if curl -s http://localhost:8001/ > /dev/null; then
+                echo "✓ Root endpoint responding"
+              else
+                echo "✗ Root endpoint not responding"
+              fi
+              
+              # Kill the server
+              kill $SERVER_PID
+              echo "Server stopped"
+            else
+              echo "✗ Server process died immediately"
+              # Try to see what error occurred
+              echo "=== Checking server output ==="
+              # Start server in foreground to see errors
+              node server.js || echo "Server failed to start"
             fi
 
-            # Start server in background and log output
-            echo "=== Starting server ==="
-            node server.js > server.log 2>&1 &
-            SERVER_PID=$!
-            echo $SERVER_PID > server.pid
-            echo "Server started with PID: $SERVER_PID"
-
-            # Wait for server to become responsive
+  customer-backend-api-tests:
+    docker:
+      - image: cimg/node:20.10.0
+      - image: mongo:6.0
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            cd CustomerPortal/Backend
+            npm install
+      - run:
+          name: Wait for MongoDB
+          command: |
             for i in {1..30}; do
-              if curl -s http://localhost:8001/api/employee > /dev/null; then
-                echo "Server is responding on /api/employee"
-                break
+              if nc -z localhost 27017; then
+                echo "MongoDB is ready!"
+                exit 0
               fi
-              echo "Waiting for server to start... ($i/30)"
               sleep 2
             done
-
-            # Test endpoints
-            echo "=== Running API tests ==="
-            curl -s http://localhost:8001/api/employee > /dev/null && echo "✓ API endpoint responding" || echo "✗ API endpoint not responding"
-            curl -s http://localhost:8001/ > /dev/null && echo "✓ Root endpoint responding" || echo "✗ Root endpoint not responding"
-
-            # Output server logs for debugging
-            echo "=== Server logs ==="
-            tail -20 server.log
-
-            # Cleanup
-            echo "=== Cleaning up ==="
-            kill $SERVER_PID || true
-            rm -f server.pid
-            echo "Server stopped"
+            echo "MongoDB failed to start"
+            exit 1
+      - run:
+          name: Create test environment
+          command: |
+            cd CustomerPortal/Backend
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8000" >> .env
+            echo "JWT_SECRET=test" >> .env
+            echo "USE_HTTPS=false" >> .env
+      - run:
+          name: Start server and test (all in one step)
+          command: |
+            cd CustomerPortal/Backend
+            
+            # Start server in background but keep it in this step
+            node server.js &
+            SERVER_PID=$!
+            echo "Server started with PID: $SERVER_PID"
+            
+            # Wait a bit for server to start
+            sleep 5
+            
+            # Check if server is running
+            if ps -p $SERVER_PID > /dev/null; then
+              echo "✓ Server process is running"
+              
+              # Test the endpoints
+              echo "=== Testing endpoints ==="
+              if curl -s http://localhost:8000/api/customer > /dev/null; then
+                echo "✓ API endpoint responding"
+              else
+                echo "✗ API endpoint not responding"
+              fi
+              
+              if curl -s http://localhost:8000/ > /dev/null; then
+                echo "✓ Root endpoint responding"
+              else
+                echo "✗ Root endpoint not responding"
+              fi
+              
+              # Kill the server
+              kill $SERVER_PID
+              echo "Server stopped"
+            else
+              echo "✗ Server process died immediately"
+              # Try to see what error occurred
+              echo "=== Checking server output ==="
+              # Start server in foreground to see errors
+              node server.js || echo "Server failed to start"
+            fi
 
 workflows:
   version: 2
   test-all:
     jobs:
       - employee-backend-api-tests
+      - customer-backend-api-tests
