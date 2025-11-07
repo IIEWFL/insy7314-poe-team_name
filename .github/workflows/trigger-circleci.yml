@@ -57,9 +57,9 @@ jobs:
         run: |
           echo "Running Semgrep scan..."
           # SARIF output for GitHub Code Scanning
-          semgrep scan --config=p/node --sarif --output=semgrep-results.sarif CustomerPortal/Backend EmployeePortal/Backend || echo "Semgrep scan completed with issues"
+          semgrep scan --config=p/javascript --sarif --output=semgrep-results.sarif CustomerPortal/Backend EmployeePortal/Backend || echo "Semgrep scan completed with issues"
           # Human-readable summary
-          semgrep scan --config=p/node --json CustomerPortal/Backend EmployeePortal/Backend > semgrep-temp.json || echo '{"runs":[]}' > semgrep-temp.json
+          semgrep scan --config=p/javascript --json CustomerPortal/Backend EmployeePortal/Backend > semgrep-temp.json || echo '{"runs":[]}' > semgrep-temp.json
           jq -r '.runs[].results[] | "Rule: \(.rule_id)\nFile: \(.path)\nLine: \(.start.line)\nMessage: \(.extra.message)\n---"' semgrep-temp.json > semgrep-results.txt || echo "No findings" > semgrep-results.txt
           rm -f semgrep-temp.json
           if [ ! -f "semgrep-results.sarif" ]; then
