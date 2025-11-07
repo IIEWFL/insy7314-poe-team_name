@@ -68,20 +68,16 @@ commands:
 
   setup-mongodb-docker:
     description: "Set up MongoDB using Docker"
-    parameters:
-      project-path:
-        type: string
     steps:
       - run:
           name: Wait for MongoDB to be ready
           command: |
             echo "Waiting for MongoDB to be ready..."
-            # First check if MongoDB port is open
+            # Simple connection test using netcat to check if port is open
             for i in {1..30}; do
               if nc -z localhost 27017; then
-                echo "MongoDB port is open"
-                # Now test connection using the project's installed mongodb module
-                cd << parameters.project-path >>
+                echo "MongoDB port is open, testing connection..."
+                # Now test with Node.js MongoDB driver
                 if node -e "
                 const { MongoClient } = require('mongodb');
                 const uri = 'mongodb://localhost:27017/INSY7314';
@@ -162,83 +158,6 @@ commands:
               -Dsonar.password=admin \
               -Dsonar.sources=src,controllers,models,routes,middleware \
               -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.d.ts
-
-  start-server-and-test:
-    description: "Start server and run basic tests"
-    parameters:
-      project-path:
-        type: string
-      port:
-        type: string
-      health-endpoint:
-        type: string
-        default: "/"
-    steps:
-      - run:
-          name: Create Test Environment File
-          command: |
-            cd << parameters.project-path >>
-            # Use local MongoDB for CI testing
-            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
-            echo "PORT=<< parameters.port >>" >> .env
-            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
-            echo "USE_HTTPS=false" >> .env
-      - run:
-          name: Start Server
-          command: |
-            cd << parameters.project-path >>
-            # Start server and capture output for debugging
-            npm start 2>&1 | tee server.log &
-            SERVER_PID=$!
-            echo $SERVER_PID > server.pid
-          background: true
-      - run:
-          name: Wait for Server to Start
-          command: |
-            cd << parameters.project-path >>
-            for i in {1..30}; do
-              if curl -s http://localhost:<< parameters.port >><< parameters.health-endpoint >> > /dev/null; then
-                echo "Server is ready on port << parameters.port >>"
-                exit 0
-              fi
-              # Check if server process is still running
-              if ! ps -p $(cat server.pid) > /dev/null 2>&1; then
-                echo "Server process died. Checking server logs:"
-                cat server.log || echo "No server log found"
-                echo "Server failed to start (process died)"
-                exit 1
-              fi
-              echo "Waiting for server... ($i/30)"
-              sleep 2
-            done
-            echo "Server failed to start within timeout"
-            echo "Checking server logs:"
-            cat server.log || echo "No server log found"
-            exit 1
-      - run:
-          name: Run Basic API Tests
-          command: |
-            echo "Testing API endpoints on port << parameters.port >>..."
-            # Simple health check
-            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:<< parameters.port >>/api || echo "500")
-            if [ "$response" = "200" ]; then
-              echo "API health check: PASSED (Status: $response)"
-            else
-              echo "API health check: FAILED (Status: $response)"
-              # Try to get more info about the failure
-              curl -v http://localhost:<< parameters.port >>/api || echo "Detailed curl failed"
-            fi
-      - run:
-          name: Stop Server
-          command: |
-            cd << parameters.project-path >>
-            if [ -f server.pid ]; then
-              kill $(cat server.pid) 2>/dev/null || true
-              rm -f server.pid
-            fi
-      - store_artifacts:
-          path: << parameters.project-path >>/server.log
-          when: on_fail
 
 # Jobs
 jobs:
@@ -331,12 +250,46 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "CustomerPortal/Backend"
-      - setup-mongodb-docker:
-          project-path: "CustomerPortal/Backend"
-      - start-server-and-test:
-          project-path: "CustomerPortal/Backend"
-          port: "8000"
-          health-endpoint: "/api"
+      - setup-mongodb-docker
+      - run:
+          name: Create Test Environment File
+          command: |
+            cd CustomerPortal/Backend
+            # Use local MongoDB for CI testing
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8000" >> .env
+            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
+            echo "USE_HTTPS=false" >> .env
+      - run:
+          name: Start Customer Backend Server
+          command: |
+            cd CustomerPortal/Backend
+            npm start &
+          background: true
+      - run:
+          name: Wait for Server to Start
+          command: |
+            for i in {1..30}; do
+              if curl -s http://localhost:8000 > /dev/null; then
+                echo "Server is ready"
+                exit 0
+              fi
+              echo "Waiting for server... ($i/30)"
+              sleep 2
+            done
+            echo "Server failed to start"
+            exit 1
+      - run:
+          name: Run Basic API Tests
+          command: |
+            echo "Testing customer API endpoints..."
+            # Simple health check
+            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api || echo "500")
+            if [ "$response" = "200" ]; then
+              echo "Customer API health check: PASSED"
+            else
+              echo "Customer API health check: FAILED (Status: $response)"
+            fi
       - store_artifacts:
           path: CustomerPortal/Backend
 
@@ -459,12 +412,46 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "EmployeePortal/Backend"
-      - setup-mongodb-docker:
-          project-path: "EmployeePortal/Backend"
-      - start-server-and-test:
-          project-path: "EmployeePortal/Backend"
-          port: "8001"
-          health-endpoint: "/api/employee"
+      - setup-mongodb-docker
+      - run:
+          name: Create Test Environment File
+          command: |
+            cd EmployeePortal/Backend
+            # Use local MongoDB for CI testing
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8001" >> .env
+            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
+            echo "USE_HTTPS=false" >> .env
+      - run:
+          name: Start Employee Backend Server
+          command: |
+            cd EmployeePortal/Backend
+            npm start &
+          background: true
+      - run:
+          name: Wait for Server to Start
+          command: |
+            for i in {1..30}; do
+              if curl -s http://localhost:8001 > /dev/null; then
+                echo "Server is ready"
+                exit 0
+              fi
+              echo "Waiting for server... ($i/30)"
+              sleep 2
+            done
+            echo "Server failed to start"
+            exit 1
+      - run:
+          name: Run Basic API Tests
+          command: |
+            echo "Testing employee API endpoints..."
+            # Simple health check
+            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee || echo "500")
+            if [ "$response" = "200" ]; then
+              echo "Employee API health check: PASSED"
+            else
+              echo "Employee API health check: FAILED (Status: $response)"
+            fi
       - store_artifacts:
           path: EmployeePortal/Backend
 
