@@ -1,71 +1,189 @@
-employee-backend-api-tests:
-  executor: node-mongo-executor
-  steps:
-    - checkout
-    - install-dependencies:
-        project-path: "EmployeePortal/Backend"
-    - setup-mongodb-docker
-    - run:
-        name: Debug - Show what's in the backend directory
-        command: |
-          cd EmployeePortal/Backend
-          echo "=== Directory Structure ==="
-          ls -la
-          echo "=== package.json ==="
-          cat package.json || echo "No package.json"
-          echo "=== server.js ==="
-          cat server.js || echo "No server.js"
-          echo "=== Node version ==="
-          node --version
-    - run:
-        name: Create minimal test environment
-        command: |
-          cd EmployeePortal/Backend
-          echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
-          echo "PORT=8001" >> .env
-          echo "JWT_SECRET=test" >> .env
-          echo "USE_HTTPS=false" >> .env
-    - run:
-        name: Kill anything on port 8001
-        command: |
-          pkill -f "node.*8001" || true
-          sleep 2
-    - run:
-        name: Start server and capture ALL output
-        command: |
-          cd EmployeePortal/Backend
-          # Start with full debugging
-          node server.js 2>&1 | tee server.log &
-          echo $! > server.pid
-          echo "Server PID: $(cat server.pid)"
-          sleep 10  # Give it time to start or fail
-    - run:
-        name: Check what happened
-        command: |
-          echo "=== Checking server status ==="
-          if [ -f EmployeePortal/Backend/server.pid ]; then
-            echo "PID file exists: $(cat EmployeePortal/Backend/server.pid)"
-            if ps -p $(cat EmployeePortal/Backend/server.pid) > /dev/null; then
-              echo "Server process is running"
+version: 2.1
+
+jobs:
+  # ==================== EMPLOYEE PORTAL API TESTS ====================
+  employee-backend-api-tests:
+    docker:
+      - image: cimg/node:20.10.0
+      - image: mongo:6.0
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            cd EmployeePortal/Backend
+            npm install
+      - run:
+          name: Wait for MongoDB
+          command: |
+            echo "Waiting for MongoDB to be ready..."
+            for i in {1..30}; do
+              if nc -z localhost 27017; then
+                echo "MongoDB is ready!"
+                exit 0
+              fi
+              echo "Waiting for MongoDB... ($i/30)"
+              sleep 2
+            done
+            echo "MongoDB failed to start"
+            exit 1
+      - run:
+          name: Debug - Show backend structure
+          command: |
+            cd EmployeePortal/Backend
+            echo "=== Directory Structure ==="
+            ls -la
+            echo "=== package.json ==="
+            cat package.json || echo "No package.json"
+            echo "=== Checking for server files ==="
+            find . -name "*.js" | head -10
+      - run:
+          name: Create test environment
+          command: |
+            cd EmployeePortal/Backend
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8001" >> .env
+            echo "JWT_SECRET=test" >> .env
+            echo "USE_HTTPS=false" >> .env
+      - run:
+          name: Kill anything on port 8001
+          command: |
+            pkill -f "node.*8001" || true
+            sleep 2
+      - run:
+          name: Start server and capture ALL output
+          command: |
+            cd EmployeePortal/Backend
+            # Start with full debugging
+            node server.js 2>&1 | tee server.log &
+            echo $! > server.pid
+            echo "Server PID: $(cat server.pid)"
+            sleep 10  # Give it time to start or fail
+      - run:
+          name: Check what happened
+          command: |
+            echo "=== Checking server status ==="
+            if [ -f EmployeePortal/Backend/server.pid ]; then
+              echo "PID file exists: $(cat EmployeePortal/Backend/server.pid)"
+              if ps -p $(cat EmployeePortal/Backend/server.pid) > /dev/null; then
+                echo "Server process is running"
+              else
+                echo "Server process is DEAD"
+              fi
             else
-              echo "Server process is DEAD"
+              echo "No PID file - server never started properly"
             fi
-          else
-            echo "No PID file - server never started properly"
-          fi
-          
-          echo "=== Checking ports ==="
-          netstat -tulpn | grep :8001 || echo "Port 8001 not in use"
-          
-          echo "=== Full server logs ==="
-          cat EmployeePortal/Backend/server.log || echo "No server logs"
-          
-          echo "=== Testing connection ==="
-          curl -v http://localhost:8001/api/employee || echo "CURL FAILED"
-          
-          echo "=== Testing root ==="
-          curl -v http://localhost:8001/ || echo "ROOT FAILED"
-    - run:
-        name: Cleanup
-        command: |
-          pkill -f "node.*8001" || true
+            
+            echo "=== Checking ports ==="
+            netstat -tulpn | grep :8001 || echo "Port 8001 not in use"
+            
+            echo "=== Full server logs ==="
+            cat EmployeePortal/Backend/server.log || echo "No server logs"
+            
+            echo "=== Testing connection ==="
+            curl -v http://localhost:8001/api/employee || echo "CURL FAILED"
+            
+            echo "=== Testing root ==="
+            curl -v http://localhost:8001/ || echo "ROOT FAILED"
+      - run:
+          name: Cleanup
+          command: |
+            pkill -f "node.*8001" || true
+
+  # ==================== CUSTOMER PORTAL API TESTS ====================
+  customer-backend-api-tests:
+    docker:
+      - image: cimg/node:20.10.0
+      - image: mongo:6.0
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            cd CustomerPortal/Backend
+            npm install
+      - run:
+          name: Wait for MongoDB
+          command: |
+            echo "Waiting for MongoDB to be ready..."
+            for i in {1..30}; do
+              if nc -z localhost 27017; then
+                echo "MongoDB is ready!"
+                exit 0
+              fi
+              echo "Waiting for MongoDB... ($i/30)"
+              sleep 2
+            done
+            echo "MongoDB failed to start"
+            exit 1
+      - run:
+          name: Debug - Show backend structure
+          command: |
+            cd CustomerPortal/Backend
+            echo "=== Directory Structure ==="
+            ls -la
+            echo "=== package.json ==="
+            cat package.json || echo "No package.json"
+            echo "=== Checking for server files ==="
+            find . -name "*.js" | head -10
+      - run:
+          name: Create test environment
+          command: |
+            cd CustomerPortal/Backend
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8000" >> .env
+            echo "JWT_SECRET=test" >> .env
+            echo "USE_HTTPS=false" >> .env
+      - run:
+          name: Kill anything on port 8000
+          command: |
+            pkill -f "node.*8000" || true
+            sleep 2
+      - run:
+          name: Start server and capture ALL output
+          command: |
+            cd CustomerPortal/Backend
+            # Start with full debugging
+            node server.js 2>&1 | tee server.log &
+            echo $! > server.pid
+            echo "Server PID: $(cat server.pid)"
+            sleep 10  # Give it time to start or fail
+      - run:
+          name: Check what happened
+          command: |
+            echo "=== Checking server status ==="
+            if [ -f CustomerPortal/Backend/server.pid ]; then
+              echo "PID file exists: $(cat CustomerPortal/Backend/server.pid)"
+              if ps -p $(cat CustomerPortal/Backend/server.pid) > /dev/null; then
+                echo "Server process is running"
+              else
+                echo "Server process is DEAD"
+              fi
+            else
+              echo "No PID file - server never started properly"
+            fi
+            
+            echo "=== Checking ports ==="
+            netstat -tulpn | grep :8000 || echo "Port 8000 not in use"
+            
+            echo "=== Full server logs ==="
+            cat CustomerPortal/Backend/server.log || echo "No server logs"
+            
+            echo "=== Testing connection ==="
+            curl -v http://localhost:8000/api/customer || echo "CURL FAILED"
+            
+            echo "=== Testing root ==="
+            curl -v http://localhost:8000/ || echo "ROOT FAILED"
+      - run:
+          name: Cleanup
+          command: |
+            pkill -f "node.*8000" || true
+
+workflows:
+  version: 2
+  test-all:
+    jobs:
+      - employee-backend-api-tests
+      - customer-backend-api-tests
