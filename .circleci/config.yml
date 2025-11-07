@@ -36,6 +36,7 @@ executors:
       - image: cimg/node:20.10.0
       - image: sonarqube:community
     working_directory: ~/project
+    resource_class: medium
 
   node-mongo-executor:
     docker:
@@ -59,15 +60,8 @@ commands:
           name: Install Dependencies
           command: |
             cd << parameters.project-path >>
-            echo "=== INSTALLING DEPENDENCIES ==="
-            echo "Current directory: $(pwd)"
-            echo "Package.json exists: $(test -f package.json && echo 'YES' || echo 'NO')"
-            echo "Package-lock.json exists: $(test -f package-lock.json && echo 'YES' || echo 'NO')"
             # Use npm install instead of npm ci to handle lock file issues
             npm install --legacy-peer-deps
-            echo "=== DEPENDENCIES INSTALLED ==="
-            echo "Node modules created: $(test -d node_modules && echo 'YES' || echo 'NO')"
-            echo "MongoDB driver installed: $(test -d node_modules/mongodb && echo 'YES' || echo 'NO')"
       - save_cache:
           key: v1-deps-<< parameters.project-path >>-{{ checksum "<< parameters.project-path >>/package-lock.json" }}
           paths:
@@ -75,156 +69,47 @@ commands:
 
   setup-mongodb-docker:
     description: "Set up MongoDB using Docker"
-    parameters:
-      project-path:
-        type: string
-        default: ""
     steps:
-      - run:
-          name: Check MongoDB Container Status
-          command: |
-            echo "=== MONGODB SETUP DEBUG ==="
-            echo "Checking Docker containers..."
-            docker ps -a
-            echo "Checking MongoDB container logs..."
-            docker logs $(docker ps -q --filter "ancestor=mongo:6.0") || echo "No MongoDB container found"
-            echo "=== END MONGODB DEBUG ==="
       - run:
           name: Wait for MongoDB to be ready
           command: |
-            echo "=== WAITING FOR MONGODB ==="
-            echo "Current directory: $(pwd)"
-            echo "Project path: << parameters.project-path >>"
-            
-            # Check if dependencies are installed
-            if [ -n "<< parameters.project-path >>" ]; then
-              echo "Checking for MongoDB driver in << parameters.project-path >>..."
-              if [ -d "<< parameters.project-path >>/node_modules/mongodb" ]; then
-                echo "✓ MongoDB driver found in project node_modules"
-              else
-                echo "✗ MongoDB driver NOT found in project node_modules"
-                echo "Listing node_modules:"
-                ls -la << parameters.project-path >>/node_modules/ | head -20
-              fi
-            fi
-            
-            echo "Testing MongoDB connection with extensive logging..."
-            
-            for i in {1..40}; do
-              echo "=== Attempt $i/40 ==="
-              
-              # Check if MongoDB port is open
-              echo "1. Checking if MongoDB port 27017 is open..."
+            echo "Waiting for MongoDB to be ready..."
+            # Simple connection test using netcat to check if port is open
+            for i in {1..30}; do
               if nc -z localhost 27017; then
-                echo "✓ MongoDB port 27017 is open"
-                
-                # Check MongoDB container status
-                echo "2. Checking MongoDB container status..."
-                docker ps --filter "ancestor=mongo:6.0" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-                
-                # Try multiple connection methods
-                echo "3. Testing connection with Node.js script..."
-                
-                # Create a test script with better error handling
-                cat > /tmp/mongo_test.js << 'EOF'
-                console.log("=== MONGODB CONNECTION TEST ===");
-                console.log("Node.js version:", process.version);
-                
-                try {
-                  console.log("Attempting to require mongodb...");
-                  const { MongoClient } = require('mongodb');
-                  console.log("✓ MongoDB module loaded successfully");
-                  
-                  const uri = 'mongodb://localhost:27017/INSY7314';
-                  console.log("Connection URI:", uri);
-                  
-                  const client = new MongoClient(uri, {
-                    serverSelectionTimeoutMS: 5000,
-                    connectTimeoutMS: 5000,
-                    socketTimeoutMS: 5000
-                  });
-                  
-                  console.log("Attempting to connect...");
-                  await client.connect();
-                  console.log("✓ Connected to MongoDB");
-                  
-                  console.log("Sending ping command...");
-                  const result = await client.db().admin().ping();
-                  console.log("✓ Ping result:", result);
-                  
-                  console.log("Listing databases...");
-                  const dbs = await client.db().admin().listDatabases();
-                  console.log("✓ Available databases:", dbs.databases.map(db => db.name));
-                  
-                  await client.close();
-                  console.log("✓ Connection closed");
-                  console.log("=== CONNECTION TEST: SUCCESS ===");
-                  process.exit(0);
-                } catch (error) {
-                  console.log("=== CONNECTION TEST: FAILED ===");
-                  console.log("Error name:", error.name);
-                  console.log("Error message:", error.message);
-                  console.log("Error code:", error.code);
-                  console.log("Error stack:", error.stack);
-                  
-                  // Try alternative connection methods
-                  console.log("=== ALTERNATIVE CONNECTION ATTEMPTS ===");
-                  
-                  // Try without database name
+                echo "MongoDB port is open, testing connection..."
+                # Now test with Node.js MongoDB driver
+                if node -e "
+                const { MongoClient } = require('mongodb');
+                const uri = 'mongodb://localhost:27017/INSY7314';
+                async function testConnection() {
                   try {
-                    console.log("Trying connection without database name...");
-                    const { MongoClient } = require('mongodb');
-                    const client = new MongoClient('mongodb://localhost:27017/', {
-                      serverSelectionTimeoutMS: 3000
-                    });
+                    const client = new MongoClient(uri);
                     await client.connect();
-                    console.log("✓ Connected without database name");
+                    const result = await client.db().admin().ping();
+                    console.log('MongoDB connection successful:', result);
                     await client.close();
-                  } catch (e) {
-                    console.log("✗ Failed without database name:", e.message);
+                    return true;
+                  } catch (error) {
+                    console.log('MongoDB connection failed:', error.message);
+                    return false;
                   }
-                  
-                  process.exit(1);
                 }
-EOF
-
-                # Run the test script from the project directory to ensure correct node_modules path
-                if [ -n "<< parameters.project-path >>" ] && [ -d "<< parameters.project-path >>/node_modules" ]; then
-                  echo "Running test from project directory: << parameters.project-path >>"
-                  cd "<< parameters.project-path >>"
-                  if node /tmp/mongo_test.js; then
-                    echo "🎉 MongoDB connection successful!"
-                    exit 0
-                  else
-                    echo "MongoDB connection failed, retrying..."
-                  fi
-                  cd -
+                testConnection().then(success => {
+                  process.exit(success ? 0 : 1);
+                });
+                "; then
+                  echo "MongoDB is ready and responsive!"
+                  exit 0
                 else
-                  echo "Running test from current directory"
-                  if node /tmp/mongo_test.js; then
-                    echo "🎉 MongoDB connection successful!"
-                    exit 0
-                  else
-                    echo "MongoDB connection failed, retrying..."
-                  fi
+                  echo "MongoDB port open but connection failed, retrying..."
                 fi
-                
               else
-                echo "✗ MongoDB port 27017 is not open yet"
-                echo "Checking Docker container status..."
-                docker ps -a | grep mongo || echo "No MongoDB containers found"
+                echo "Waiting for MongoDB port to open... ($i/30)"
               fi
-              
-              echo "Waiting 2 seconds before retry..."
               sleep 2
             done
-            
-            echo "=== MONGODB SETUP FAILED ==="
-            echo "MongoDB failed to start or become responsive after 40 attempts"
-            echo "Final Docker container status:"
-            docker ps -a
-            echo "Final MongoDB container logs:"
-            docker logs $(docker ps -q --filter "ancestor=mongo:6.0") || echo "No MongoDB container"
+            echo "MongoDB failed to start or become responsive"
             exit 1
 
   setup-sonarqube:
@@ -366,42 +251,36 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "CustomerPortal/Backend"
-      - setup-mongodb-docker:
-          project-path: "CustomerPortal/Backend"
+      - setup-mongodb-docker
       - run:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            echo "Creating test environment file..."
+            # Use local MongoDB for CI testing
             echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
             echo "PORT=8000" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
-            echo "Environment file created:"
-            cat .env
       - run:
           name: Start Customer Backend Server
           command: |
             cd CustomerPortal/Backend
-            echo "Starting Customer Backend Server..."
+            # Start server and capture PID for cleanup
             npm start &
-            echo "Server started in background"
+            echo $! > server.pid
           background: true
       - run:
           name: Wait for Server to Start
           command: |
-            echo "Waiting for Customer Backend Server to start..."
             for i in {1..30}; do
               if curl -s http://localhost:8000 > /dev/null; then
-                echo "✓ Server is ready and responding"
+                echo "Server is ready"
                 exit 0
               fi
               echo "Waiting for server... ($i/30)"
               sleep 2
             done
-            echo "✗ Server failed to start"
-            echo "Checking if process is running..."
-            ps aux | grep node
+            echo "Server failed to start"
             exit 1
       - run:
           name: Run Basic API Tests
@@ -410,11 +289,22 @@ jobs:
             # Simple health check
             response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api || echo "500")
             if [ "$response" = "200" ]; then
-              echo "✓ Customer API health check: PASSED (Status: $response)"
+              echo "Customer API health check: PASSED"
             else
-              echo "✗ Customer API health check: FAILED (Status: $response)"
-              echo "Full response:"
-              curl -v http://localhost:8000/api || echo "Curl failed"
+              echo "Customer API health check: FAILED (Status: $response)"
+            fi
+      - run:
+          name: Stop Server
+          command: |
+            cd CustomerPortal/Backend
+            if [ -f server.pid ]; then
+              echo "Stopping server with PID $(cat server.pid)"
+              kill $(cat server.pid) || true
+              sleep 2
+              # Force kill if still running
+              kill -9 $(cat server.pid) 2>/dev/null || true
+              rm -f server.pid
+              echo "Server stopped"
             fi
       - store_artifacts:
           path: CustomerPortal/Backend
@@ -538,42 +428,36 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "EmployeePortal/Backend"
-      - setup-mongodb-docker:
-          project-path: "EmployeePortal/Backend"
+      - setup-mongodb-docker
       - run:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            echo "Creating test environment file..."
+            # Use local MongoDB for CI testing
             echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
             echo "PORT=8001" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
-            echo "Environment file created:"
-            cat .env
       - run:
           name: Start Employee Backend Server
           command: |
             cd EmployeePortal/Backend
-            echo "Starting Employee Backend Server..."
+            # Start server and capture PID for cleanup
             npm start &
-            echo "Server started in background"
+            echo $! > server.pid
           background: true
       - run:
           name: Wait for Server to Start
           command: |
-            echo "Waiting for Employee Backend Server to start..."
             for i in {1..30}; do
               if curl -s http://localhost:8001 > /dev/null; then
-                echo "✓ Server is ready and responding"
+                echo "Server is ready"
                 exit 0
               fi
               echo "Waiting for server... ($i/30)"
               sleep 2
             done
-            echo "✗ Server failed to start"
-            echo "Checking if process is running..."
-            ps aux | grep node
+            echo "Server failed to start"
             exit 1
       - run:
           name: Run Basic API Tests
@@ -582,11 +466,22 @@ jobs:
             # Simple health check
             response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee || echo "500")
             if [ "$response" = "200" ]; then
-              echo "✓ Employee API health check: PASSED (Status: $response)"
+              echo "Employee API health check: PASSED"
             else
-              echo "✗ Employee API health check: FAILED (Status: $response)"
-              echo "Full response:"
-              curl -v http://localhost:8001/api/employee || echo "Curl failed"
+              echo "Employee API health check: FAILED (Status: $response)"
+            fi
+      - run:
+          name: Stop Server
+          command: |
+            cd EmployeePortal/Backend
+            if [ -f server.pid ]; then
+              echo "Stopping server with PID $(cat server.pid)"
+              kill $(cat server.pid) || true
+              sleep 2
+              # Force kill if still running
+              kill -9 $(cat server.pid) 2>/dev/null || true
+              rm -f server.pid
+              echo "Server stopped"
             fi
       - store_artifacts:
           path: EmployeePortal/Backend
@@ -627,7 +522,57 @@ workflows:
   
   # Main workflow triggered by GitHub Actions
   github-triggered-pipeline:
-    when: << pipeline.parameters.GHA_Action >>
+    when: 
+      and:
+        - not:
+            equals: { << pipeline.parameters.GHA_Action >>, null }
+    jobs:
+      # Customer Portal Backend
+      - customer-backend-build
+      - customer-backend-sast:
+          requires:
+            - customer-backend-build
+      - customer-backend-sca:
+          requires:
+            - customer-backend-build
+      - customer-backend-sonarqube:
+          requires:
+            - customer-backend-build
+      - customer-backend-api-tests:
+          requires:
+            - customer-backend-build
+
+      # Customer Portal Frontend
+      - customer-frontend-build
+      - customer-frontend-security:
+          requires:
+            - customer-frontend-build
+
+      # Employee Portal Backend
+      - employee-backend-build
+      - employee-backend-sast:
+          requires:
+            - employee-backend-build
+      - employee-backend-sca:
+          requires:
+            - employee-backend-build
+      - employee-backend-sonarqube:
+          requires:
+            - employee-backend-build
+      - employee-backend-api-tests:
+          requires:
+            - employee-backend-build
+
+      # Employee Portal Frontend
+      - employee-frontend-build
+      - employee-frontend-security:
+          requires:
+            - employee-frontend-build
+
+  # Fallback workflow that always runs (for direct CircleCI triggers)
+  direct-pipeline:
+    when:
+      not: << pipeline.parameters.GHA_Action >>
     jobs:
       # Customer Portal Backend
       - customer-backend-build
