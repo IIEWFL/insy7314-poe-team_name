@@ -104,7 +104,9 @@ commands:
       - run:
           name: Create MongoDB test script
           command: |
-            cat > << parameters.project-path >>/wait-for-mongo.js << 'EOF'
+            # Create the test script using a different approach to avoid heredoc issues
+            cd << parameters.project-path >>
+            cat > wait-for-mongo.js << 'EOF'
             const { MongoClient } = require('mongodb');
             const uri = 'mongodb://localhost:27017/INSY7314';
             
