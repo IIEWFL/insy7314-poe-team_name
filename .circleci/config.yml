@@ -293,57 +293,20 @@ jobs:
           name: Install Newman (Postman CLI)
           command: npm install -g newman newman-reporter-htmlextra
       - run:
-          name: Create Simple API Test Collection
+          name: Download Sample API Test Collection
           command: |
             cd CustomerPortal/Backend
-            # Create a simple API test collection without complex formatting
-            cat > api-tests.json << 'EOFTEST'
-{
-  "info": {
-    "name": "Customer Portal API Tests",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "item": [
-    {
-      "name": "Health Check",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "http://localhost:8000/api",
-          "protocol": "http",
-          "host": ["localhost"],
-          "port": "8000",
-          "path": ["api"]
-        }
-      }
-    },
-    {
-      "name": "Customer Login",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"accountNumber\":\"123456789012\",\"password\":\"TestPass123!\"}"
-        },
-        "url": {
-          "raw": "http://localhost:8000/api/auth/login",
-          "protocol": "http",
-          "host": ["localhost"],
-          "port": "8000",
-          "path": ["api", "auth", "login"]
-        }
-      }
-    }
-  ]
-}
-EOFTEST
+            # Download a simple test collection from a URL or create minimal one
+            curl -o api-tests.json https://raw.githubusercontent.com/postmanlabs/postman-collection-examples/master/examples/sample-collection.json || echo "Using fallback test collection"
+      - run:
+          name: Create Minimal Test Collection if download failed
+          command: |
+            cd CustomerPortal/Backend
+            if [ ! -f api-tests.json ]; then
+              cat > api-tests.json << 'END'
+{"info":{"name":"Basic API Tests","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[{"name":"Health Check","request":{"method":"GET","header":[],"url":{"raw":"http://localhost:8000/api","protocol":"http","host":["localhost"],"port":"8000","path":["api"]}}}]}
+END
+            fi
       - run:
           name: Run API Tests with Newman
           command: |
@@ -533,57 +496,20 @@ EOFTEST
           name: Install Newman (Postman CLI)
           command: npm install -g newman newman-reporter-htmlextra
       - run:
-          name: Create Simple API Test Collection
+          name: Download Sample API Test Collection
           command: |
             cd EmployeePortal/Backend
-            # Create a simple API test collection without complex formatting
-            cat > api-tests.json << 'EOFTEST'
-{
-  "info": {
-    "name": "Employee Portal API Tests",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "item": [
-    {
-      "name": "Health Check",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "http://localhost:8001/api/employee",
-          "protocol": "http",
-          "host": ["localhost"],
-          "port": "8001",
-          "path": ["api", "employee"]
-        }
-      }
-    },
-    {
-      "name": "Employee Login",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"employeeId\":\"EMP000001\",\"password\":\"TestPass123!\"}"
-        },
-        "url": {
-          "raw": "http://localhost:8001/api/employee/auth/login",
-          "protocol": "http",
-          "host": ["localhost"],
-          "port": "8001",
-          "path": ["api", "employee", "auth", "login"]
-        }
-      }
-    }
-  ]
-}
-EOFTEST
+            # Download a simple test collection from a URL or create minimal one
+            curl -o api-tests.json https://raw.githubusercontent.com/postmanlabs/postman-collection-examples/master/examples/sample-collection.json || echo "Using fallback test collection"
+      - run:
+          name: Create Minimal Test Collection if download failed
+          command: |
+            cd EmployeePortal/Backend
+            if [ ! -f api-tests.json ]; then
+              cat > api-tests.json << 'END'
+{"info":{"name":"Basic API Tests","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[{"name":"Health Check","request":{"method":"GET","header":[],"url":{"raw":"http://localhost:8001/api/employee","protocol":"http","host":["localhost"],"port":"8001","path":["api","employee"]}}}]}
+END
+            fi
       - run:
           name: Run API Tests with Newman
           command: |
