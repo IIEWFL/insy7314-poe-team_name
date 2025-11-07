@@ -1,0 +1,633 @@
+version: 2.1
+
+# Reusable executors
+executors:
+  node-executor:
+    docker:
+      - image: cimg/node:20.10.0
+    working_directory: ~/project
+
+  security-executor:
+    docker:
+      - image: cimg/node:20.10.0
+    working_directory: ~/project
+
+  sonarqube-executor:
+    docker:
+      - image: sonarsource/sonar-scanner-cli:latest
+    working_directory: ~/project
+
+# Reusable commands
+commands:
+  install-dependencies:
+    description: "Install npm dependencies with caching"
+    parameters:
+      project-path:
+        type: string
+    steps:
+      - restore_cache:
+          keys:
+            - v1-deps-<< parameters.project-path >>-{{ checksum "<< parameters.project-path >>/package-lock.json" }}
+            - v1-deps-<< parameters.project-path >>-
+      - run:
+          name: Install Dependencies
+          command: |
+            cd << parameters.project-path >>
+            npm ci
+      - save_cache:
+          key: v1-deps-<< parameters.project-path >>-{{ checksum "<< parameters.project-path >>/package-lock.json" }}
+          paths:
+            - << parameters.project-path >>/node_modules
+
+  setup-mongodb:
+    description: "Set up MongoDB for testing"
+    steps:
+      - run:
+          name: Install MongoDB
+          command: |
+            wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | sudo apt-key add -
+            echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+            sudo apt-get update
+            sudo apt-get install -y mongodb-org
+      - run:
+          name: Start MongoDB
+          command: |
+            sudo mkdir -p /data/db
+            sudo chown -R circleci:circleci /data/db
+            mongod --fork --logpath /var/log/mongodb.log
+          background: true
+      - run:
+          name: Wait for MongoDB
+          command: |
+            for i in {1..30}; do
+              if mongosh --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+                echo "MongoDB is ready"
+                exit 0
+              fi
+              echo "Waiting for MongoDB... ($i/30)"
+              sleep 2
+            done
+            echo "MongoDB failed to start"
+            exit 1
+
+  setup-sonarqube-server:
+    description: "Start SonarQube server locally"
+    steps:
+      - run:
+          name: Start SonarQube Server
+          command: |
+            docker run -d --name sonarqube -p 9000:9000 sonarqube:community
+          background: true
+      - run:
+          name: Wait for SonarQube to be ready
+          command: |
+            for i in {1..60}; do
+              if curl -s http://localhost:9000/api/system/status | grep -q "UP"; then
+                echo "SonarQube is ready"
+                exit 0
+              fi
+              echo "Waiting for SonarQube... ($i/60)"
+              sleep 10
+            done
+            echo "SonarQube failed to start"
+            exit 1
+      - run:
+          name: Set SonarQube Admin Password
+          command: |
+            curl -u admin:admin -X POST "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=admin123"
+
+  run-sonarqube-analysis:
+    description: "Run SonarQube analysis against local server"
+    parameters:
+      project-key:
+        type: string
+      project-name:
+        type: string
+      project-path:
+        type: string
+    steps:
+      - run:
+          name: Run SonarQube Scanner
+          command: |
+            cd << parameters.project-path >>
+            sonar-scanner \
+              -Dsonar.projectKey=<< parameters.project-key >> \
+              -Dsonar.projectName="<< parameters.project-name >>" \
+              -Dsonar.sources=. \
+              -Dsonar.host.url=http://localhost:9000 \
+              -Dsonar.login=admin \
+              -Dsonar.password=admin123 \
+              -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/dist/**,**/build/** \
+              -Dsonar.tests=. \
+              -Dsonar.test.inclusions=**/*.test.js,**/*.spec.js \
+              -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+              -Dsonar.coverage.exclusions=**/node_modules/**,**/coverage/**,**/dist/**,**/build/** \
+              -Dsonar.qualitygate.wait=true
+      - run:
+          name: Download SonarQube Report
+          command: |
+            cd << parameters.project-path >>
+            curl -u admin:admin123 "http://localhost:9000/api/project_analyses/search?project=<< parameters.project-key >>" > sonarqube-analysis.json
+            curl -u admin:admin123 "http://localhost:9000/api/measures/component?component=<< parameters.project-key >>&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density" > sonarqube-measures.json
+      - store_artifacts:
+          path: << parameters.project-path >>/.scannerwork
+      - store_artifacts:
+          path: << parameters.project-path >>/sonarqube-analysis.json
+      - store_artifacts:
+          path: << parameters.project-path >>/sonarqube-measures.json
+
+# Jobs
+jobs:
+  # ==================== SONARQUBE SERVER SETUP ====================
+  
+  setup-sonarqube:
+    executor: node-executor
+    steps:
+      - checkout
+      - setup-sonarqube-server
+
+  # ==================== CUSTOMER PORTAL JOBS ====================
+  
+  customer-backend-build:
+    executor: node-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "CustomerPortal/Backend"
+      - persist_to_workspace:
+          root: .
+          paths:
+            - CustomerPortal/Backend
+
+  customer-backend-sast:
+    executor: security-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "CustomerPortal/Backend"
+      - run:
+          name: Install Semgrep (SAST)
+          command: |
+            python3 -m pip install --upgrade pip
+            pip3 install semgrep
+      - run:
+          name: Run Semgrep SAST Scan
+          command: |
+            cd CustomerPortal/Backend
+            semgrep scan --config=auto --json --output=semgrep-report.json || true
+            semgrep scan --config=auto --sarif --output=semgrep-report.sarif || true
+      - run:
+          name: Install NodeJsScan (SAST)
+          command: |
+            pip3 install nodejsscan
+      - run:
+          name: Run NodeJsScan
+          command: |
+            cd CustomerPortal/Backend
+            nodejsscan --directory . --output nodejsscan-report.json || true
+      - store_artifacts:
+          path: CustomerPortal/Backend/semgrep-report.json
+      - store_artifacts:
+          path: CustomerPortal/Backend/semgrep-report.sarif
+      - store_artifacts:
+          path: CustomerPortal/Backend/nodejsscan-report.json
+
+  customer-backend-sca:
+    executor: security-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "CustomerPortal/Backend"
+      - run:
+          name: Install OWASP Dependency-Check
+          command: |
+            wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
+            unzip dependency-check-9.0.9-release.zip -d ~/
+      - run:
+          name: Run npm audit
+          command: |
+            cd CustomerPortal/Backend
+            npm audit --json > npm-audit-report.json || true
+            npm audit || true
+      - run:
+          name: Run OWASP Dependency-Check
+          command: |
+            cd CustomerPortal/Backend
+            ~/dependency-check/bin/dependency-check.sh \
+              --project "Customer Portal Backend" \
+              --scan . \
+              --format JSON \
+              --format HTML \
+              --out dependency-check-report || true
+      - run:
+          name: Install and Run Snyk
+          command: |
+            npm install -g snyk
+            cd CustomerPortal/Backend
+            snyk test --json > snyk-report.json || true
+            snyk monitor || true
+      - store_artifacts:
+          path: CustomerPortal/Backend/npm-audit-report.json
+      - store_artifacts:
+          path: CustomerPortal/Backend/dependency-check-report
+      - store_artifacts:
+          path: CustomerPortal/Backend/snyk-report.json
+
+  customer-backend-sonarqube:
+    executor: sonarqube-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "CustomerPortal/Backend"
+      - run-sonarqube-analysis:
+          project-key: "customer-portal-backend"
+          project-name: "Customer Portal Backend"
+          project-path: "CustomerPortal/Backend"
+
+  customer-backend-api-tests:
+    executor: node-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "CustomerPortal/Backend"
+      - setup-mongodb
+      - run:
+          name: Create Test Environment File
+          command: |
+            cd CustomerPortal/Backend
+            cat > .env << EOF
+            MONGODB_URI=mongodb://localhost:27017/test_customer_portal
+            PORT=8000
+            JWT_SECRET=test_secret_key_for_ci
+            USE_HTTPS=false
+            EOF
+      - run:
+          name: Start Customer Backend Server
+          command: |
+            cd CustomerPortal/Backend
+            npm start
+          background: true
+      - run:
+          name: Wait for Server to Start
+          command: |
+            for i in {1..30}; do
+              if curl -s http://localhost:8000 > /dev/null; then
+                echo "Server is ready"
+                exit 0
+              fi
+              echo "Waiting for server... ($i/30)"
+              sleep 2
+            done
+            echo "Server failed to start"
+            exit 1
+      - run:
+          name: Install Newman (Postman CLI)
+          command: npm install -g newman newman-reporter-htmlextra
+      - run:
+          name: Create API Test Collection
+          command: |
+            cd CustomerPortal/Backend
+            cat > api-tests.json << 'EOF'
+            {
+              "info": {
+                "name": "Customer Portal API Tests",
+                "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+              },
+              "item": [
+                {
+                  "name": "Health Check",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "http://localhost:8000/api",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8000",
+                      "path": ["api"]
+                    }
+                  }
+                }
+              ]
+            }
+            EOF
+      - run:
+          name: Run API Tests with Newman
+          command: |
+            cd CustomerPortal/Backend
+            newman run api-tests.json \
+              --reporters cli,htmlextra \
+              --reporter-htmlextra-export newman-report.html || true
+      - store_artifacts:
+          path: CustomerPortal/Backend/newman-report.html
+
+  customer-frontend-build:
+    executor: node-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "CustomerPortal/Frontend"
+      - run:
+          name: Build Frontend
+          command: |
+            cd CustomerPortal/Frontend
+            npm run build
+      - persist_to_workspace:
+          root: .
+          paths:
+            - CustomerPortal/Frontend/build
+
+  customer-frontend-security:
+    executor: security-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "CustomerPortal/Frontend"
+      - run:
+          name: Run npm audit on Frontend
+          command: |
+            cd CustomerPortal/Frontend
+            npm audit --json > npm-audit-report.json || true
+      - run:
+          name: Install and Run ESLint Security Plugin
+          command: |
+            cd CustomerPortal/Frontend
+            npm install --save-dev eslint-plugin-security
+            npx eslint . --ext .js,.jsx --format json --output-file eslint-report.json || true
+      - store_artifacts:
+          path: CustomerPortal/Frontend/npm-audit-report.json
+      - store_artifacts:
+          path: CustomerPortal/Frontend/eslint-report.json
+
+  # ==================== EMPLOYEE PORTAL JOBS ====================
+
+  employee-backend-build:
+    executor: node-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - persist_to_workspace:
+          root: .
+          paths:
+            - EmployeePortal/Backend
+
+  employee-backend-sast:
+    executor: security-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - run:
+          name: Install Semgrep (SAST)
+          command: |
+            python3 -m pip install --upgrade pip
+            pip3 install semgrep
+      - run:
+          name: Run Semgrep SAST Scan
+          command: |
+            cd EmployeePortal/Backend
+            semgrep scan --config=auto --json --output=semgrep-report.json || true
+            semgrep scan --config=auto --sarif --output=semgrep-report.sarif || true
+      - run:
+          name: Install NodeJsScan (SAST)
+          command: |
+            pip3 install nodejsscan
+      - run:
+          name: Run NodeJsScan
+          command: |
+            cd EmployeePortal/Backend
+            nodejsscan --directory . --output nodejsscan-report.json || true
+      - store_artifacts:
+          path: EmployeePortal/Backend/semgrep-report.json
+      - store_artifacts:
+          path: EmployeePortal/Backend/semgrep-report.sarif
+      - store_artifacts:
+          path: EmployeePortal/Backend/nodejsscan-report.json
+
+  employee-backend-sca:
+    executor: security-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - run:
+          name: Install OWASP Dependency-Check
+          command: |
+            wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
+            unzip dependency-check-9.0.9-release.zip -d ~/
+      - run:
+          name: Run npm audit
+          command: |
+            cd EmployeePortal/Backend
+            npm audit --json > npm-audit-report.json || true
+            npm audit || true
+      - run:
+          name: Run OWASP Dependency-Check
+          command: |
+            cd EmployeePortal/Backend
+            ~/dependency-check/bin/dependency-check.sh \
+              --project "Employee Portal Backend" \
+              --scan . \
+              --format JSON \
+              --format HTML \
+              --out dependency-check-report || true
+      - run:
+          name: Install and Run Snyk
+          command: |
+            npm install -g snyk
+            cd EmployeePortal/Backend
+            snyk test --json > snyk-report.json || true
+            snyk monitor || true
+      - store_artifacts:
+          path: EmployeePortal/Backend/npm-audit-report.json
+      - store_artifacts:
+          path: EmployeePortal/Backend/dependency-check-report
+      - store_artifacts:
+          path: EmployeePortal/Backend/snyk-report.json
+
+  employee-backend-sonarqube:
+    executor: sonarqube-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - run-sonarqube-analysis:
+          project-key: "employee-portal-backend"
+          project-name: "Employee Portal Backend"
+          project-path: "EmployeePortal/Backend"
+
+  employee-backend-api-tests:
+    executor: node-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - setup-mongodb
+      - run:
+          name: Create Test Environment File
+          command: |
+            cd EmployeePortal/Backend
+            cat > .env << EOF
+            MONGODB_URI=mongodb://localhost:27017/test_employee_portal
+            PORT=8001
+            JWT_SECRET=test_secret_key_for_ci
+            USE_HTTPS=false
+            EOF
+      - run:
+          name: Start Employee Backend Server
+          command: |
+            cd EmployeePortal/Backend
+            npm start
+          background: true
+      - run:
+          name: Wait for Server to Start
+          command: |
+            for i in {1..30}; do
+              if curl -s http://localhost:8001 > /dev/null; then
+                echo "Server is ready"
+                exit 0
+              fi
+              echo "Waiting for server... ($i/30)"
+              sleep 2
+            done
+            echo "Server failed to start"
+            exit 1
+      - run:
+          name: Install Newman (Postman CLI)
+          command: npm install -g newman newman-reporter-htmlextra
+      - run:
+          name: Create API Test Collection
+          command: |
+            cd EmployeePortal/Backend
+            cat > api-tests.json << 'EOF'
+            {
+              "info": {
+                "name": "Employee Portal API Tests",
+                "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+              },
+              "item": [
+                {
+                  "name": "Health Check",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "http://localhost:8001/api/employee",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8001",
+                      "path": ["api", "employee"]
+                    }
+                  }
+                }
+              ]
+            }
+            EOF
+      - run:
+          name: Run API Tests with Newman
+          command: |
+            cd EmployeePortal/Backend
+            newman run api-tests.json \
+              --reporters cli,htmlextra \
+              --reporter-htmlextra-export newman-report.html || true
+      - store_artifacts:
+          path: EmployeePortal/Backend/newman-report.html
+
+  employee-frontend-build:
+    executor: node-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Frontend"
+      - run:
+          name: Build Frontend
+          command: |
+            cd EmployeePortal/Frontend
+            npm run build
+      - persist_to_workspace:
+          root: .
+          paths:
+            - EmployeePortal/Frontend/build
+
+  employee-frontend-security:
+    executor: security-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Frontend"
+      - run:
+          name: Run npm audit on Frontend
+          command: |
+            cd EmployeePortal/Frontend
+            npm audit --json > npm-audit-report.json || true
+      - run:
+          name: Install and Run ESLint Security Plugin
+          command: |
+            cd EmployeePortal/Frontend
+            npm install --save-dev eslint-plugin-security
+            npx eslint . --ext .js,.jsx --format json --output-file eslint-report.json || true
+      - store_artifacts:
+          path: EmployeePortal/Frontend/npm-audit-report.json
+      - store_artifacts:
+          path: EmployeePortal/Frontend/eslint-report.json
+
+# Workflows
+workflows:
+  version: 2
+  
+  # Main workflow triggered by GitHub Actions
+  github-triggered-pipeline:
+    jobs:
+      # SonarQube Server Setup (runs first)
+      - setup-sonarqube
+      
+      # Customer Portal Backend
+      - customer-backend-build:
+          requires:
+            - setup-sonarqube
+      - customer-backend-sast:
+          requires:
+            - customer-backend-build
+      - customer-backend-sca:
+          requires:
+            - customer-backend-build
+      - customer-backend-sonarqube:
+          requires:
+            - customer-backend-build
+      - customer-backend-api-tests:
+          requires:
+            - customer-backend-build
+
+      # Customer Portal Frontend
+      - customer-frontend-build:
+          requires:
+            - setup-sonarqube
+      - customer-frontend-security:
+          requires:
+            - customer-frontend-build
+
+      # Employee Portal Backend
+      - employee-backend-build:
+          requires:
+            - setup-sonarqube
+      - employee-backend-sast:
+          requires:
+            - employee-backend-build
+      - employee-backend-sca:
+          requires:
+            - employee-backend-build
+      - employee-backend-sonarqube:
+          requires:
+            - employee-backend-build
+      - employee-backend-api-tests:
+          requires:
+            - employee-backend-build
+
+      # Employee Portal Frontend
+      - employee-frontend-build:
+          requires:
+            - setup-sonarqube
+      - employee-frontend-security:
+          requires:
+            - employee-frontend-build
