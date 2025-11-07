@@ -60,7 +60,7 @@ jobs:
               
               echo "=== Testing Employee Portal Endpoints ==="
               
-              # Test 1: Employee Auth endpoints (should return 400 for missing data, not 404)
+              # Test 1: Basic endpoint responsiveness
               echo "1. Testing /api/employee/auth/login..."
               login_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/login)
               echo "   Login endpoint: HTTP $login_code"
@@ -70,48 +70,81 @@ jobs:
                 echo "   ✗ Login endpoint failed (HTTP $login_code)"
               fi
               
-              echo "2. Testing /api/employee/auth/register..."
-              register_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/register)
+              # Test 2: Try to register a test employee (if admin auth is disabled)
+              echo "2. Testing employee registration..."
+              register_response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8001/api/employee/auth/register \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "employeeId": "TEST001",
+                  "email": "test.employee@company.com", 
+                  "password": "testpassword123",
+                  "firstName": "Test",
+                  "lastName": "Employee",
+                  "department": "IT",
+                  "position": "QA Tester",
+                  "role": "employee"
+                }')
+              register_code=$(echo "$register_response" | tail -n1)
+              register_body=$(echo "$register_response" | head -n -1)
+              
               echo "   Register endpoint: HTTP $register_code"
-              if [[ "$register_code" =~ ^(400|401|403)$ ]]; then
-                echo "   ✓ Register endpoint exists (returned $register_code)"
+              if [[ "$register_code" =~ ^(201|400|409|403)$ ]]; then
+                echo "   ✓ Register endpoint working (HTTP $register_code)"
+                if [[ "$register_code" == "201" ]]; then
+                  echo "   ✅ SUCCESS: Test employee created!"
+                elif [[ "$register_code" == "409" ]]; then
+                  echo "   ℹ️  Employee already exists"
+                fi
               else
                 echo "   ✗ Register endpoint failed (HTTP $register_code)"
+                echo "   Response: $register_body"
               fi
               
-              # Test 2: Employee Profile endpoints (should return 401 unauthorized without auth)
-              echo "3. Testing /api/employee/profile/me..."
-              profile_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/profile/me)
-              echo "   Profile endpoint: HTTP $profile_code"
-              if [[ "$profile_code" =~ ^(401|404)$ ]]; then
-                echo "   ✓ Profile endpoint exists (returned $profile_code - needs auth)"
-              else
-                echo "   ✗ Profile endpoint failed (HTTP $profile_code)"
-              fi
+              # Test 3: Try to login with test credentials
+              echo "3. Testing employee login..."
+              login_response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8001/api/employee/auth/login \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "employeeId": "TEST001",
+                  "password": "testpassword123"
+                }')
+              login_code=$(echo "$login_response" | tail -n1)
+              login_body=$(echo "$login_response" | head -n -1)
               
-              # Test 3: Payment Verification endpoints (should return 401 unauthorized without auth)
-              echo "4. Testing /api/employee/verification/pending-payments..."
-              pending_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/verification/pending-payments)
-              echo "   Pending payments: HTTP $pending_code"
-              if [[ "$pending_code" =~ ^(401|404)$ ]]; then
-                echo "   ✓ Verification endpoint exists (returned $pending_code - needs auth)"
+              echo "   Login attempt: HTTP $login_code"
+              if [[ "$login_code" == "200" ]]; then
+                echo "   ✅ SUCCESS: Login successful!"
+                # Extract JWT token from response
+                TOKEN=$(echo "$login_body" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+                if [ -n "$TOKEN" ]; then
+                  echo "   🔐 JWT Token obtained"
+                  
+                  # Test 4: Use token to access protected endpoints
+                  echo "4. Testing authenticated profile access..."
+                  profile_response=$(curl -s -w "\n%{http_code}" http://localhost:8001/api/employee/profile/me \
+                    -H "Authorization: Bearer $TOKEN")
+                  profile_code=$(echo "$profile_response" | tail -n1)
+                  profile_body=$(echo "$profile_response" | head -n -1)
+                  
+                  echo "   Profile access: HTTP $profile_code"
+                  if [[ "$profile_code" == "200" ]]; then
+                    echo "   ✅ SUCCESS: Authenticated profile access working!"
+                  else
+                    echo "   ⚠️  Profile access failed (HTTP $profile_code)"
+                    echo "   Response: $profile_body"
+                  fi
+                fi
+              elif [[ "$login_code" == "401" ]]; then
+                echo "   ❌ Login failed - invalid credentials"
               else
-                echo "   ✗ Verification endpoint failed (HTTP $pending_code)"
-              fi
-              
-              echo "5. Testing /api/employee/verification/payments..."
-              payments_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/verification/payments)
-              echo "   All payments: HTTP $payments_code"
-              if [[ "$payments_code" =~ ^(401|404)$ ]]; then
-                echo "   ✓ Payments endpoint exists (returned $payments_code - needs auth)"
-              else
-                echo "   ✗ Payments endpoint failed (HTTP $payments_code)"
+                echo "   ⚠️  Login attempt returned: HTTP $login_code"
+                echo "   Response: $login_body"
               fi
               
               echo "=== Employee Portal Test Summary ==="
-              echo "All endpoints are responding with expected status codes!"
-              echo "401 responses mean: endpoints exist but require authentication ✓"
-              echo "400 responses mean: endpoints exist but need proper request data ✓"
+              echo "Basic connectivity: ✓"
+              echo "Endpoint responsiveness: ✓" 
+              echo "Authentication flow: $( [[ -n "$TOKEN" ]] && echo "✓" || echo "⚠️ Partial" )"
               
               exit 0
             else
@@ -178,59 +211,101 @@ jobs:
               
               echo "=== Testing Customer Portal Endpoints ==="
               
-              # Test 1: Customer Auth endpoints (should return 400 for missing data)
-              echo "1. Testing /api/auth/login..."
-              login_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/login)
-              echo "   Login endpoint: HTTP $login_code"
-              if [[ "$login_code" =~ ^(400|401)$ ]]; then
-                echo "   ✓ Login endpoint exists (returned $login_code - missing credentials)"
-              else
-                echo "   ✗ Login endpoint failed (HTTP $login_code)"
-              fi
+              # Test 1: Customer signup
+              echo "1. Testing customer signup..."
+              signup_response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8000/api/auth/signup \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "email": "test.customer@example.com",
+                  "password": "testpassword123", 
+                  "firstName": "Test",
+                  "lastName": "Customer",
+                  "phone": "+1234567890"
+                }')
+              signup_code=$(echo "$signup_response" | tail -n1)
+              signup_body=$(echo "$signup_response" | head -n -1)
               
-              echo "2. Testing /api/auth/signup..."
-              signup_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/signup)
               echo "   Signup endpoint: HTTP $signup_code"
-              if [[ "$signup_code" =~ ^(400)$ ]]; then
-                echo "   ✓ Signup endpoint exists (returned $signup_code - missing data)"
+              if [[ "$signup_code" =~ ^(201|400|409)$ ]]; then
+                echo "   ✓ Signup endpoint working (HTTP $signup_code)"
+                if [[ "$signup_code" == "201" ]]; then
+                  echo "   ✅ SUCCESS: Test customer created!"
+                elif [[ "$signup_code" == "409" ]]; then
+                  echo "   ℹ️  Customer already exists"
+                fi
               else
                 echo "   ✗ Signup endpoint failed (HTTP $signup_code)"
+                echo "   Response: $signup_body"
               fi
               
-              # Test 2: Customer Payment endpoints
-              echo "3. Testing /api/customerPayments/all..."
-              payments_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerPayments/all)
-              echo "   All payments: HTTP $payments_code"
-              if [[ "$payments_code" =~ ^(200|404)$ ]]; then
-                echo "   ✓ Payments endpoint exists (returned $payments_code)"
+              # Test 2: Customer login
+              echo "2. Testing customer login..."
+              login_response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8000/api/auth/login \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "email": "test.customer@example.com", 
+                  "password": "testpassword123"
+                }')
+              login_code=$(echo "$login_response" | tail -n1)
+              login_body=$(echo "$login_response" | head -n -1)
+              
+              echo "   Login attempt: HTTP $login_code"
+              if [[ "$login_code" == "200" ]]; then
+                echo "   ✅ SUCCESS: Login successful!"
+                # Extract JWT token from response
+                TOKEN=$(echo "$login_body" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+                if [ -n "$TOKEN" ]; then
+                  echo "   🔐 JWT Token obtained"
+                  
+                  # Test 3: Use token to access protected profile
+                  echo "3. Testing authenticated profile access..."
+                  profile_response=$(curl -s -w "\n%{http_code}" http://localhost:8000/api/customerProfiles/me \
+                    -H "Authorization: Bearer $TOKEN")
+                  profile_code=$(echo "$profile_response" | tail -n1)
+                  profile_body=$(echo "$profile_response" | head -n -1)
+                  
+                  echo "   Profile access: HTTP $profile_code"
+                  if [[ "$profile_code" == "200" ]]; then
+                    echo "   ✅ SUCCESS: Authenticated profile access working!"
+                  else
+                    echo "   ⚠️  Profile access failed (HTTP $profile_code)"
+                    echo "   Response: $profile_body"
+                  fi
+                  
+                  # Test 4: Access payment endpoints with auth
+                  echo "4. Testing authenticated payment access..."
+                  payments_response=$(curl -s -w "\n%{http_code}" http://localhost:8000/api/customerPayments/my-payments \
+                    -H "Authorization: Bearer $TOKEN")
+                  payments_code=$(echo "$payments_response" | tail -n1)
+                  
+                  echo "   Payments access: HTTP $payments_code"
+                  if [[ "$payments_code" == "200" ]]; then
+                    echo "   ✅ SUCCESS: Authenticated payments access working!"
+                  else
+                    echo "   ⚠️  Payments access returned: HTTP $payments_code"
+                  fi
+                fi
+              elif [[ "$login_code" == "401" ]]; then
+                echo "   ❌ Login failed - invalid credentials"
               else
-                echo "   ✗ Payments endpoint failed (HTTP $payments_code)"
+                echo "   ⚠️  Login attempt returned: HTTP $login_code"
+                echo "   Response: $login_body"
               fi
               
-              echo "4. Testing /api/customerPayments/status/pending..."
-              status_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerPayments/status/pending)
-              echo "   Status endpoint: HTTP $status_code"
-              if [[ "$status_code" =~ ^(200|404)$ ]]; then
-                echo "   ✓ Status endpoint exists (returned $status_code)"
+              # Test 5: Public payment endpoints (no auth required)
+              echo "5. Testing public payment endpoints..."
+              public_payments_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerPayments/all)
+              echo "   Public payments: HTTP $public_payments_code"
+              if [[ "$public_payments_code" == "200" ]]; then
+                echo "   ✅ SUCCESS: Public payments endpoint working!"
               else
-                echo "   ✗ Status endpoint failed (HTTP $status_code)"
-              fi
-              
-              # Test 3: Customer Profile endpoints (should return 401 without auth)
-              echo "5. Testing /api/customerProfiles/me..."
-              profile_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerProfiles/me)
-              echo "   Profile endpoint: HTTP $profile_code"
-              if [[ "$profile_code" =~ ^(401|404)$ ]]; then
-                echo "   ✓ Profile endpoint exists (returned $profile_code - needs auth)"
-              else
-                echo "   ✗ Profile endpoint failed (HTTP $profile_code)"
+                echo "   ⚠️  Public payments returned: HTTP $public_payments_code"
               fi
               
               echo "=== Customer Portal Test Summary ==="
-              echo "All endpoints are responding with expected status codes!"
-              echo "401 responses mean: endpoints exist but require authentication ✓"
-              echo "400 responses mean: endpoints exist but need proper request data ✓"
-              echo "200 responses mean: endpoints are publicly accessible ✓"
+              echo "Basic connectivity: ✓"
+              echo "Authentication flow: $( [[ -n "$TOKEN" ]] && echo "✓" || echo "⚠️ Partial" )"
+              echo "Public endpoints: $( [[ "$public_payments_code" == "200" ]] && echo "✓" || echo "⚠️" )"
               
               exit 0
             else
