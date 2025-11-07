@@ -70,21 +70,19 @@ commands:
     description: "Set up MongoDB using Docker"
     steps:
       - run:
-          name: Install MongoDB client tools
-          command: |
-            sudo apt-get update
-            sudo apt-get install -y wget gnupg
-            wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
-            echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
-            sudo apt-get update
-            sudo apt-get install -y mongodb-mongosh
-      - run:
           name: Wait for MongoDB to be ready
           command: |
             echo "Waiting for MongoDB to be ready..."
+            # Try different possible hostnames for MongoDB container
             for i in {1..30}; do
-              # Use the Docker container name (mongo-0) to connect
-              if mongosh --host mongo-0 --port 27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+              # Try multiple possible hostnames
+              if mongosh --host mongo --port 27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+                echo "MongoDB is ready!"
+                exit 0
+              elif mongosh --host localhost --port 27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+                echo "MongoDB is ready!"
+                exit 0
+              elif mongosh --host 127.0.0.1 --port 27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
                 echo "MongoDB is ready!"
                 exit 0
               fi
@@ -92,6 +90,9 @@ commands:
               sleep 2
             done
             echo "MongoDB failed to start"
+            echo "Trying alternative connection method..."
+            # Try using Docker network inspection
+            docker network ls
             exit 1
 
   setup-sonarqube:
@@ -238,11 +239,45 @@ jobs:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            # Use the Docker container name for MongoDB connection
-            echo "MONGODB_URI=mongodb://mongo-0:27017/test_customer_portal" > .env
-            echo "PORT=8000" >> .env
-            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
-            echo "USE_HTTPS=false" >> .env
+            # Try different MongoDB connection strings
+            cat > .env << 'EOF'
+MONGODB_URI=mongodb://mongo:27017/test_customer_portal
+PORT=8000
+JWT_SECRET=test_secret_key_for_ci
+USE_HTTPS=false
+EOF
+      - run:
+          name: Test MongoDB Connection
+          command: |
+            cd CustomerPortal/Backend
+            # Test which MongoDB connection works
+            echo "Testing MongoDB connection..."
+            node -e "
+            const { MongoClient } = require('mongodb');
+            async function testConnection() {
+              const uris = [
+                'mongodb://mongo:27017/test_customer_portal',
+                'mongodb://localhost:27017/test_customer_portal',
+                'mongodb://127.0.0.1:27017/test_customer_portal'
+              ];
+              
+              for (const uri of uris) {
+                try {
+                  const client = new MongoClient(uri);
+                  await client.connect();
+                  await client.db().admin().ping();
+                  console.log('SUCCESS: MongoDB connected using', uri);
+                  await client.close();
+                  process.exit(0);
+                } catch (err) {
+                  console.log('FAILED:', uri, err.message);
+                }
+              }
+              console.log('All connection attempts failed');
+              process.exit(1);
+            }
+            testConnection();
+            "
       - run:
           name: Start Customer Backend Server
           command: |
@@ -400,11 +435,45 @@ jobs:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            # Use the Docker container name for MongoDB connection
-            echo "MONGODB_URI=mongodb://mongo-0:27017/test_employee_portal" > .env
-            echo "PORT=8001" >> .env
-            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
-            echo "USE_HTTPS=false" >> .env
+            # Try different MongoDB connection strings
+            cat > .env << 'EOF'
+MONGODB_URI=mongodb://mongo:27017/test_employee_portal
+PORT=8001
+JWT_SECRET=test_secret_key_for_ci
+USE_HTTPS=false
+EOF
+      - run:
+          name: Test MongoDB Connection
+          command: |
+            cd EmployeePortal/Backend
+            # Test which MongoDB connection works
+            echo "Testing MongoDB connection..."
+            node -e "
+            const { MongoClient } = require('mongodb');
+            async function testConnection() {
+              const uris = [
+                'mongodb://mongo:27017/test_employee_portal',
+                'mongodb://localhost:27017/test_employee_portal',
+                'mongodb://127.0.0.1:27017/test_employee_portal'
+              ];
+              
+              for (const uri of uris) {
+                try {
+                  const client = new MongoClient(uri);
+                  await client.connect();
+                  await client.db().admin().ping();
+                  console.log('SUCCESS: MongoDB connected using', uri);
+                  await client.close();
+                  process.exit(0);
+                } catch (err) {
+                  console.log('FAILED:', uri, err.message);
+                }
+              }
+              console.log('All connection attempts failed');
+              process.exit(1);
+            }
+            testConnection();
+            "
       - run:
           name: Start Employee Backend Server
           command: |
