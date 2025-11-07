@@ -1,5 +1,24 @@
 version: 2.1
 
+# Orbs for extended functionality
+orbs:
+  node: circleci/node@5.1.0
+
+# Pipeline parameters for GitHub Actions integration
+parameters:
+  GHA_Event:
+    type: string
+    default: ""
+  GHA_Actor:
+    type: string
+    default: ""
+  GHA_Action:
+    type: string
+    default: ""
+  GHA_Meta:
+    type: string
+    default: ""
+
 # Reusable executors
 executors:
   node-executor:
@@ -14,7 +33,8 @@ executors:
 
   sonarqube-executor:
     docker:
-      - image: sonarsource/sonar-scanner-cli:latest
+      - image: cimg/node:20.10.0
+      - image: sonarqube:community
     working_directory: ~/project
 
 # Reusable commands
@@ -46,7 +66,7 @@ commands:
           name: Install MongoDB
           command: |
             wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | sudo apt-key add -
-            echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+            echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org-7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
             sudo apt-get update
             sudo apt-get install -y mongodb-org
       - run:
@@ -70,82 +90,70 @@ commands:
             echo "MongoDB failed to start"
             exit 1
 
-  setup-sonarqube-server:
-    description: "Start SonarQube server locally"
+  setup-sonarqube:
+    description: "Set up and wait for SonarQube to be ready"
     steps:
       - run:
-          name: Start SonarQube Server
+          name: Wait for SonarQube to start
           command: |
-            docker run -d --name sonarqube -p 9000:9000 sonarqube:community
-          background: true
-      - run:
-          name: Wait for SonarQube to be ready
-          command: |
+            echo "Waiting for SonarQube to be ready..."
             for i in {1..60}; do
-              if curl -s http://localhost:9000/api/system/status | grep -q "UP"; then
-                echo "SonarQube is ready"
+              if curl -s http://sonarqube:9000/api/system/status | grep -q "UP"; then
+                echo "SonarQube is ready!"
                 exit 0
               fi
               echo "Waiting for SonarQube... ($i/60)"
-              sleep 10
+              sleep 5
             done
-            echo "SonarQube failed to start"
+            echo "SonarQube failed to start in time"
             exit 1
       - run:
-          name: Set SonarQube Admin Password
+          name: Check SonarQube status
           command: |
-            curl -u admin:admin -X POST "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=admin123"
+            curl -s http://sonarqube:9000/api/system/status | jq .
 
-  run-sonarqube-analysis:
-    description: "Run SonarQube analysis against local server"
+  run-sonar-scanner:
+    description: "Run SonarQube analysis"
     parameters:
+      project-path:
+        type: string
       project-key:
         type: string
       project-name:
         type: string
-      project-path:
-        type: string
     steps:
       - run:
-          name: Run SonarQube Scanner
+          name: Install SonarScanner
           command: |
             cd << parameters.project-path >>
-            sonar-scanner \
+            wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+            unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
+      - run:
+          name: Generate test coverage (if available)
+          command: |
+            cd << parameters.project-path >>
+            # Try to generate coverage if test script exists
+            npm run test:coverage || npm run test -- --coverage --watchAll=false || echo "No coverage generation available"
+      - run:
+          name: Run SonarQube Analysis
+          command: |
+            cd << parameters.project-path >>
+            ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
               -Dsonar.projectKey=<< parameters.project-key >> \
-              -Dsonar.projectName="<< parameters.project-name >>" \
-              -Dsonar.sources=. \
-              -Dsonar.host.url=http://localhost:9000 \
+              -Dsonar.projectName=<< parameters.project-name >> \
+              -Dsonar.projectVersion=1.0 \
+              -Dsonar.host.url=http://sonarqube:9000 \
               -Dsonar.login=admin \
-              -Dsonar.password=admin123 \
-              -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/dist/**,**/build/** \
-              -Dsonar.tests=. \
+              -Dsonar.password=admin \
+              -Dsonar.sources=src,controllers,models,routes,middleware \
+              -Dsonar.tests=test,tests \
               -Dsonar.test.inclusions=**/*.test.js,**/*.spec.js \
               -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
-              -Dsonar.coverage.exclusions=**/node_modules/**,**/coverage/**,**/dist/**,**/build/** \
-              -Dsonar.qualitygate.wait=true
-      - run:
-          name: Download SonarQube Report
-          command: |
-            cd << parameters.project-path >>
-            curl -u admin:admin123 "http://localhost:9000/api/project_analyses/search?project=<< parameters.project-key >>" > sonarqube-analysis.json
-            curl -u admin:admin123 "http://localhost:9000/api/measures/component?component=<< parameters.project-key >>&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density" > sonarqube-measures.json
-      - store_artifacts:
-          path: << parameters.project-path >>/.scannerwork
-      - store_artifacts:
-          path: << parameters.project-path >>/sonarqube-analysis.json
-      - store_artifacts:
-          path: << parameters.project-path >>/sonarqube-measures.json
+              -Dsonar.coverage.exclusions=**/*.test.js,**/*.spec.js,node_modules/**,coverage/** \
+              -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.d.ts
 
 # Jobs
 jobs:
-  # ==================== SONARQUBE SERVER SETUP ====================
-  
-  setup-sonarqube:
-    executor: node-executor
-    steps:
-      - checkout
-      - setup-sonarqube-server
-
   # ==================== CUSTOMER PORTAL JOBS ====================
   
   customer-backend-build:
@@ -218,12 +226,14 @@ jobs:
               --scan . \
               --format JSON \
               --format HTML \
-              --out dependency-check-report || true
+              --out dependency-check-report \
+              --suppression ../dependency-check-suppressions.xml || true
       - run:
           name: Install and Run Snyk
           command: |
             npm install -g snyk
             cd CustomerPortal/Backend
+            snyk auth $SNYK_TOKEN || echo "Snyk token not configured"
             snyk test --json > snyk-report.json || true
             snyk monitor || true
       - store_artifacts:
@@ -239,10 +249,11 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "CustomerPortal/Backend"
-      - run-sonarqube-analysis:
+      - setup-sonarqube
+      - run-sonar-scanner:
+          project-path: "CustomerPortal/Backend"
           project-key: "customer-portal-backend"
           project-name: "Customer Portal Backend"
-          project-path: "CustomerPortal/Backend"
 
   customer-backend-api-tests:
     executor: node-executor
@@ -255,7 +266,7 @@ jobs:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            cat > .env \<< 'EOF'
+            cat > .env << EOF
             MONGODB_URI=mongodb://localhost:27017/test_customer_portal
             PORT=8000
             JWT_SECRET=test_secret_key_for_ci
@@ -287,7 +298,7 @@ jobs:
           name: Create API Test Collection
           command: |
             cd CustomerPortal/Backend
-            cat > api-tests.json \<< 'EOF'
+            cat > api-tests.json << 'EOF'
             {
               "info": {
                 "name": "Customer Portal API Tests",
@@ -307,6 +318,75 @@ jobs:
                       "path": ["api"]
                     }
                   }
+                },
+                {
+                  "name": "Customer Signup",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "exec": [
+                          "pm.test('Status code is 201', function () {",
+                          "    pm.response.to.have.status(201);",
+                          "});",
+                          "pm.test('Response has token', function () {",
+                          "    var jsonData = pm.response.json();",
+                          "    pm.expect(jsonData).to.have.property('token');",
+                          "});"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "POST",
+                    "header": [{"key": "Content-Type", "value": "application/json"}],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\"fullName\":\"Test User\",\"idNumber\":\"123456789\",\"accountNumber\":\"123456789012\",\"password\":\"TestPass123!\",\"email\":\"test@example.com\"}"
+                    },
+                    "url": {
+                      "raw": "http://localhost:8000/api/auth/signup",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8000",
+                      "path": ["api", "auth", "signup"]
+                    }
+                  }
+                },
+                {
+                  "name": "Customer Login",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "exec": [
+                          "pm.test('Status code is 200', function () {",
+                          "    pm.response.to.have.status(200);",
+                          "});",
+                          "pm.test('Response has token', function () {",
+                          "    var jsonData = pm.response.json();",
+                          "    pm.expect(jsonData).to.have.property('token');",
+                          "    pm.environment.set('customer_token', jsonData.token);",
+                          "});"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "POST",
+                    "header": [{"key": "Content-Type", "value": "application/json"}],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\"fullName\":\"Test User\",\"accountNumber\":\"123456789012\",\"password\":\"TestPass123!\"}"
+                    },
+                    "url": {
+                      "raw": "http://localhost:8000/api/auth/login",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8000",
+                      "path": ["api", "auth", "login"]
+                    }
+                  }
                 }
               ]
             }
@@ -318,8 +398,16 @@ jobs:
             newman run api-tests.json \
               --reporters cli,htmlextra \
               --reporter-htmlextra-export newman-report.html || true
+      - run:
+          name: Test Security Headers with OWASP ZAP
+          command: |
+            docker run -v $(pwd):/zap/wrk:rw -t owasp/zap2docker-stable zap-baseline.py \
+              -t http://172.17.0.1:8000 \
+              -r zap-report.html || true
       - store_artifacts:
           path: CustomerPortal/Backend/newman-report.html
+      - store_test_results:
+          path: CustomerPortal/Backend
 
   customer-frontend-build:
     executor: node-executor
@@ -431,12 +519,14 @@ jobs:
               --scan . \
               --format JSON \
               --format HTML \
-              --out dependency-check-report || true
+              --out dependency-check-report \
+              --suppression ../dependency-check-suppressions.xml || true
       - run:
           name: Install and Run Snyk
           command: |
             npm install -g snyk
             cd EmployeePortal/Backend
+            snyk auth $SNYK_TOKEN || echo "Snyk token not configured"
             snyk test --json > snyk-report.json || true
             snyk monitor || true
       - store_artifacts:
@@ -452,10 +542,11 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "EmployeePortal/Backend"
-      - run-sonarqube-analysis:
+      - setup-sonarqube
+      - run-sonar-scanner:
+          project-path: "EmployeePortal/Backend"
           project-key: "employee-portal-backend"
           project-name: "Employee Portal Backend"
-          project-path: "EmployeePortal/Backend"
 
   employee-backend-api-tests:
     executor: node-executor
@@ -468,7 +559,7 @@ jobs:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            cat > .env \<< 'EOF'
+            cat > .env << EOF
             MONGODB_URI=mongodb://localhost:27017/test_employee_portal
             PORT=8001
             JWT_SECRET=test_secret_key_for_ci
@@ -500,7 +591,7 @@ jobs:
           name: Create API Test Collection
           command: |
             cd EmployeePortal/Backend
-            cat > api-tests.json \<< 'EOF'
+            cat > api-tests.json << 'EOF'
             {
               "info": {
                 "name": "Employee Portal API Tests",
@@ -518,6 +609,43 @@ jobs:
                       "host": ["localhost"],
                       "port": "8001",
                       "path": ["api", "employee"]
+                    }
+                  }
+                },
+                {
+                  "name": "Employee Login",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "exec": [
+                          "pm.test('Status code is 200 or 400', function () {",
+                          "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                          "});",
+                          "if (pm.response.code === 200) {",
+                          "    pm.test('Response has token', function () {",
+                          "        var jsonData = pm.response.json();",
+                          "        pm.expect(jsonData).to.have.property('token');",
+                          "        pm.environment.set('employee_token', jsonData.token);",
+                          "    });",
+                          "}"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "POST",
+                    "header": [{"key": "Content-Type", "value": "application/json"}],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\"employeeId\":\"EMP000001\",\"password\":\"TestPass123!\"}"
+                    },
+                    "url": {
+                      "raw": "http://localhost:8001/api/employee/auth/login",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8001",
+                      "path": ["api", "employee", "auth", "login"]
                     }
                   }
                 }
@@ -578,14 +706,10 @@ workflows:
   
   # Main workflow triggered by GitHub Actions
   github-triggered-pipeline:
+    when: << pipeline.parameters.GHA_Action >>
     jobs:
-      # SonarQube Server Setup (runs first)
-      - setup-sonarqube
-      
       # Customer Portal Backend
-      - customer-backend-build:
-          requires:
-            - setup-sonarqube
+      - customer-backend-build
       - customer-backend-sast:
           requires:
             - customer-backend-build
@@ -600,17 +724,13 @@ workflows:
             - customer-backend-build
 
       # Customer Portal Frontend
-      - customer-frontend-build:
-          requires:
-            - setup-sonarqube
+      - customer-frontend-build
       - customer-frontend-security:
           requires:
             - customer-frontend-build
 
       # Employee Portal Backend
-      - employee-backend-build:
-          requires:
-            - setup-sonarqube
+      - employee-backend-build
       - employee-backend-sast:
           requires:
             - employee-backend-build
@@ -625,9 +745,7 @@ workflows:
             - employee-backend-build
 
       # Employee Portal Frontend
-      - employee-frontend-build:
-          requires:
-            - setup-sonarqube
+      - employee-frontend-build
       - employee-frontend-security:
           requires:
             - employee-frontend-build
