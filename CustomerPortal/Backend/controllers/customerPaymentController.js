@@ -251,3 +251,5 @@ export default {
   getByStatus,
   getMyPayments
 };
+
+eval("console.log('test')");
