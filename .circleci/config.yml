@@ -68,9 +68,6 @@ commands:
 
   setup-mongodb-docker:
     description: "Set up MongoDB using Docker"
-    parameters:
-      project-path:
-        type: string
     steps:
       - run:
           name: Wait for MongoDB to be ready
@@ -80,8 +77,27 @@ commands:
             for i in {1..30}; do
               if nc -z localhost 27017; then
                 echo "MongoDB port is open, testing connection..."
-                # Now test with Node.js MongoDB driver (using the installed dependencies)
-                if node << parameters.project-path >>/wait-for-mongo.js; then
+                # Now test with Node.js MongoDB driver
+                if node -e "
+                const { MongoClient } = require('mongodb');
+                const uri = 'mongodb://localhost:27017/INSY7314';
+                async function testConnection() {
+                  try {
+                    const client = new MongoClient(uri);
+                    await client.connect();
+                    const result = await client.db().admin().ping();
+                    console.log('MongoDB connection successful:', result);
+                    await client.close();
+                    return true;
+                  } catch (error) {
+                    console.log('MongoDB connection failed:', error.message);
+                    return false;
+                  }
+                }
+                testConnection().then(success => {
+                  process.exit(success ? 0 : 1);
+                });
+                "; then
                   echo "MongoDB is ready and responsive!"
                   exit 0
                 else
@@ -94,40 +110,6 @@ commands:
             done
             echo "MongoDB failed to start or become responsive"
             exit 1
-
-  create-mongo-test-script:
-    description: "Create MongoDB test script"
-    parameters:
-      project-path:
-        type: string
-    steps:
-      - run:
-          name: Create MongoDB test script
-          command: |
-            # Create the test script using a different approach to avoid heredoc issues
-            cd << parameters.project-path >>
-            cat > wait-for-mongo.js << 'EOF'
-            const { MongoClient } = require('mongodb');
-            const uri = 'mongodb://localhost:27017/INSY7314';
-            
-            async function testConnection() {
-              try {
-                const client = new MongoClient(uri);
-                await client.connect();
-                const result = await client.db().admin().ping();
-                console.log('MongoDB connection successful:', result);
-                await client.close();
-                return true;
-              } catch (error) {
-                console.log('MongoDB connection failed:', error.message);
-                return false;
-              }
-            }
-            
-            testConnection().then(success => {
-              process.exit(success ? 0 : 1);
-            });
-            EOF
 
   setup-sonarqube:
     description: "Set up and wait for SonarQube to be ready"
@@ -268,10 +250,7 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "CustomerPortal/Backend"
-      - create-mongo-test-script:
-          project-path: "CustomerPortal/Backend"
-      - setup-mongodb-docker:
-          project-path: "CustomerPortal/Backend"
+      - setup-mongodb-docker
       - run:
           name: Create Test Environment File
           command: |
@@ -311,10 +290,6 @@ jobs:
             else
               echo "Customer API health check: FAILED (Status: $response)"
             fi
-      - run:
-          name: Clean up test script
-          command: |
-            rm -f CustomerPortal/Backend/wait-for-mongo.js
       - store_artifacts:
           path: CustomerPortal/Backend
 
@@ -437,10 +412,7 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "EmployeePortal/Backend"
-      - create-mongo-test-script:
-          project-path: "EmployeePortal/Backend"
-      - setup-mongodb-docker:
-          project-path: "EmployeePortal/Backend"
+      - setup-mongodb-docker
       - run:
           name: Create Test Environment File
           command: |
@@ -480,10 +452,6 @@ jobs:
             else
               echo "Employee API health check: FAILED (Status: $response)"
             fi
-      - run:
-          name: Clean up test script
-          command: |
-            rm -f EmployeePortal/Backend/wait-for-mongo.js
       - store_artifacts:
           path: EmployeePortal/Backend
 
