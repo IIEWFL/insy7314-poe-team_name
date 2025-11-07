@@ -3,6 +3,7 @@ version: 2.1
 # Orbs for extended functionality
 orbs:
   node: circleci/node@5.1.0
+  sonarcloud: sonarsource/sonarcloud@2.0.0
 
 # Pipeline parameters for GitHub Actions integration
 parameters:
@@ -31,12 +32,6 @@ executors:
       - image: cimg/node:20.10.0
     working_directory: ~/project
 
-  sonarqube-executor:
-    docker:
-      - image: cimg/node:20.10.0
-      - image: sonarqube:community
-    working_directory: ~/project
-
 # Reusable commands
 commands:
   install-dependencies:
@@ -53,8 +48,7 @@ commands:
           name: Install Dependencies
           command: |
             cd << parameters.project-path >>
-            # Use npm install instead of npm ci to handle lock file issues
-            npm install --legacy-peer-deps
+            npm ci
       - save_cache:
           key: v1-deps-<< parameters.project-path >>-{{ checksum "<< parameters.project-path >>/package-lock.json" }}
           paths:
@@ -66,9 +60,8 @@ commands:
       - run:
           name: Install MongoDB
           command: |
-            # Use a working MongoDB version for Ubuntu Jammy
-            wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
-            echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+            wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | sudo apt-key add -
+            echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
             sudo apt-get update
             sudo apt-get install -y mongodb-org
       - run:
@@ -92,54 +85,6 @@ commands:
             echo "MongoDB failed to start"
             exit 1
 
-  setup-sonarqube:
-    description: "Set up and wait for SonarQube to be ready"
-    steps:
-      - run:
-          name: Wait for SonarQube to start
-          command: |
-            echo "Waiting for SonarQube to be ready..."
-            for i in {1..60}; do
-              if curl -s http://sonarqube:9000/api/system/status | grep -q "UP"; then
-                echo "SonarQube is ready!"
-                exit 0
-              fi
-              echo "Waiting for SonarQube... ($i/60)"
-              sleep 5
-            done
-            echo "SonarQube failed to start in time"
-            exit 1
-
-  run-sonar-scanner:
-    description: "Run SonarQube analysis"
-    parameters:
-      project-path:
-        type: string
-      project-key:
-        type: string
-      project-name:
-        type: string
-    steps:
-      - run:
-          name: Install SonarScanner
-          command: |
-            cd << parameters.project-path >>
-            wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
-            unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
-      - run:
-          name: Run SonarQube Analysis
-          command: |
-            cd << parameters.project-path >>
-            ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
-              -Dsonar.projectKey=<< parameters.project-key >> \
-              -Dsonar.projectName=<< parameters.project-name >> \
-              -Dsonar.projectVersion=1.0 \
-              -Dsonar.host.url=http://sonarqube:9000 \
-              -Dsonar.login=admin \
-              -Dsonar.password=admin \
-              -Dsonar.sources=src,controllers,models,routes,middleware \
-              -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.d.ts
-
 # Jobs
 jobs:
   # ==================== CUSTOMER PORTAL JOBS ====================
@@ -162,11 +107,6 @@ jobs:
       - install-dependencies:
           project-path: "CustomerPortal/Backend"
       - run:
-          name: Install Python and pip
-          command: |
-            sudo apt-get update
-            sudo apt-get install -y python3-pip
-      - run:
           name: Install Semgrep (SAST)
           command: |
             python3 -m pip install --upgrade pip
@@ -176,6 +116,7 @@ jobs:
           command: |
             cd CustomerPortal/Backend
             semgrep scan --config=auto --json --output=semgrep-report.json || true
+            semgrep scan --config=auto --sarif --output=semgrep-report.sarif || true
       - run:
           name: Install NodeJsScan (SAST)
           command: |
@@ -188,6 +129,8 @@ jobs:
       - store_artifacts:
           path: CustomerPortal/Backend/semgrep-report.json
       - store_artifacts:
+          path: CustomerPortal/Backend/semgrep-report.sarif
+      - store_artifacts:
           path: CustomerPortal/Backend/nodejsscan-report.json
 
   customer-backend-sca:
@@ -197,33 +140,50 @@ jobs:
       - install-dependencies:
           project-path: "CustomerPortal/Backend"
       - run:
+          name: Install OWASP Dependency-Check
+          command: |
+            wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
+            unzip dependency-check-9.0.9-release.zip -d ~/
+      - run:
           name: Run npm audit
           command: |
             cd CustomerPortal/Backend
             npm audit --json > npm-audit-report.json || true
+            npm audit || true
+      - run:
+          name: Run OWASP Dependency-Check
+          command: |
+            cd CustomerPortal/Backend
+            ~/dependency-check/bin/dependency-check.sh \
+              --project "Customer Portal Backend" \
+              --scan . \
+              --format JSON \
+              --format HTML \
+              --out dependency-check-report \
+              --suppression ../dependency-check-suppressions.xml || true
       - run:
           name: Install and Run Snyk
           command: |
             npm install -g snyk
             cd CustomerPortal/Backend
-            # Snyk will fail if no token, but continue anyway
-            snyk test --json > snyk-report.json 2>/dev/null || echo "Snyk test completed (auth may be required)"
+            snyk auth $SNYK_TOKEN || echo "Snyk token not configured"
+            snyk test --json > snyk-report.json || true
+            snyk monitor || true
       - store_artifacts:
           path: CustomerPortal/Backend/npm-audit-report.json
+      - store_artifacts:
+          path: CustomerPortal/Backend/dependency-check-report
       - store_artifacts:
           path: CustomerPortal/Backend/snyk-report.json
 
   customer-backend-sonarqube:
-    executor: sonarqube-executor
+    executor: node-executor
     steps:
       - checkout
       - install-dependencies:
           project-path: "CustomerPortal/Backend"
-      - setup-sonarqube
-      - run-sonar-scanner:
-          project-path: "CustomerPortal/Backend"
-          project-key: "customer-portal-backend"
-          project-name: "Customer Portal Backend"
+      - sonarcloud/scan:
+          sonar_token_variable_name: SONAR_TOKEN
 
   customer-backend-api-tests:
     executor: node-executor
@@ -236,15 +196,17 @@ jobs:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            echo "MONGODB_URI=mongodb://localhost:27017/test_customer_portal" > .env
-            echo "PORT=8000" >> .env
-            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
-            echo "USE_HTTPS=false" >> .env
+            cat > .env << EOF
+            MONGODB_URI=mongodb://localhost:27017/test_customer_portal
+            PORT=8000
+            JWT_SECRET=test_secret_key_for_ci
+            USE_HTTPS=false
+            EOF
       - run:
           name: Start Customer Backend Server
           command: |
             cd CustomerPortal/Backend
-            npm start &
+            npm start
           background: true
       - run:
           name: Wait for Server to Start
@@ -260,17 +222,121 @@ jobs:
             echo "Server failed to start"
             exit 1
       - run:
-          name: Run Basic API Tests
+          name: Install Newman (Postman CLI)
+          command: npm install -g newman newman-reporter-htmlextra
+      - run:
+          name: Create API Test Collection
           command: |
-            echo "Testing customer API endpoints..."
-            # Simple health check
-            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api || echo "500")
-            if [ "$response" = "200" ]; then
-              echo "Customer API health check: PASSED"
-            else
-              echo "Customer API health check: FAILED (Status: $response)"
-            fi
+            cd CustomerPortal/Backend
+            cat > api-tests.json << 'EOF'
+            {
+              "info": {
+                "name": "Customer Portal API Tests",
+                "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+              },
+              "item": [
+                {
+                  "name": "Health Check",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "http://localhost:8000/api",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8000",
+                      "path": ["api"]
+                    }
+                  }
+                },
+                {
+                  "name": "Customer Signup",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "exec": [
+                          "pm.test('Status code is 201', function () {",
+                          "    pm.response.to.have.status(201);",
+                          "});",
+                          "pm.test('Response has token', function () {",
+                          "    var jsonData = pm.response.json();",
+                          "    pm.expect(jsonData).to.have.property('token');",
+                          "});"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "POST",
+                    "header": [{"key": "Content-Type", "value": "application/json"}],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\"fullName\":\"Test User\",\"idNumber\":\"123456789\",\"accountNumber\":\"123456789012\",\"password\":\"TestPass123!\",\"email\":\"test@example.com\"}"
+                    },
+                    "url": {
+                      "raw": "http://localhost:8000/api/auth/signup",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8000",
+                      "path": ["api", "auth", "signup"]
+                    }
+                  }
+                },
+                {
+                  "name": "Customer Login",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "exec": [
+                          "pm.test('Status code is 200', function () {",
+                          "    pm.response.to.have.status(200);",
+                          "});",
+                          "pm.test('Response has token', function () {",
+                          "    var jsonData = pm.response.json();",
+                          "    pm.expect(jsonData).to.have.property('token');",
+                          "    pm.environment.set('customer_token', jsonData.token);",
+                          "});"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "POST",
+                    "header": [{"key": "Content-Type", "value": "application/json"}],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\"fullName\":\"Test User\",\"accountNumber\":\"123456789012\",\"password\":\"TestPass123!\"}"
+                    },
+                    "url": {
+                      "raw": "http://localhost:8000/api/auth/login",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8000",
+                      "path": ["api", "auth", "login"]
+                    }
+                  }
+                }
+              ]
+            }
+            EOF
+      - run:
+          name: Run API Tests with Newman
+          command: |
+            cd CustomerPortal/Backend
+            newman run api-tests.json \
+              --reporters cli,htmlextra \
+              --reporter-htmlextra-export newman-report.html || true
+      - run:
+          name: Test Security Headers with OWASP ZAP
+          command: |
+            docker run -v $(pwd):/zap/wrk:rw -t owasp/zap2docker-stable zap-baseline.py \
+              -t http://172.17.0.1:8000 \
+              -r zap-report.html || true
       - store_artifacts:
+          path: CustomerPortal/Backend/newman-report.html
+      - store_test_results:
           path: CustomerPortal/Backend
 
   customer-frontend-build:
@@ -283,7 +349,7 @@ jobs:
           name: Build Frontend
           command: |
             cd CustomerPortal/Frontend
-            npm run build || echo "Build may have warnings"
+            npm run build
       - persist_to_workspace:
           root: .
           paths:
@@ -300,8 +366,16 @@ jobs:
           command: |
             cd CustomerPortal/Frontend
             npm audit --json > npm-audit-report.json || true
+      - run:
+          name: Install and Run ESLint Security Plugin
+          command: |
+            cd CustomerPortal/Frontend
+            npm install --save-dev eslint-plugin-security
+            npx eslint . --ext .js,.jsx --format json --output-file eslint-report.json || true
       - store_artifacts:
           path: CustomerPortal/Frontend/npm-audit-report.json
+      - store_artifacts:
+          path: CustomerPortal/Frontend/eslint-report.json
 
   # ==================== EMPLOYEE PORTAL JOBS ====================
 
@@ -323,11 +397,6 @@ jobs:
       - install-dependencies:
           project-path: "EmployeePortal/Backend"
       - run:
-          name: Install Python and pip
-          command: |
-            sudo apt-get update
-            sudo apt-get install -y python3-pip
-      - run:
           name: Install Semgrep (SAST)
           command: |
             python3 -m pip install --upgrade pip
@@ -337,6 +406,7 @@ jobs:
           command: |
             cd EmployeePortal/Backend
             semgrep scan --config=auto --json --output=semgrep-report.json || true
+            semgrep scan --config=auto --sarif --output=semgrep-report.sarif || true
       - run:
           name: Install NodeJsScan (SAST)
           command: |
@@ -349,6 +419,8 @@ jobs:
       - store_artifacts:
           path: EmployeePortal/Backend/semgrep-report.json
       - store_artifacts:
+          path: EmployeePortal/Backend/semgrep-report.sarif
+      - store_artifacts:
           path: EmployeePortal/Backend/nodejsscan-report.json
 
   employee-backend-sca:
@@ -358,33 +430,50 @@ jobs:
       - install-dependencies:
           project-path: "EmployeePortal/Backend"
       - run:
+          name: Install OWASP Dependency-Check
+          command: |
+            wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
+            unzip dependency-check-9.0.9-release.zip -d ~/
+      - run:
           name: Run npm audit
           command: |
             cd EmployeePortal/Backend
             npm audit --json > npm-audit-report.json || true
+            npm audit || true
+      - run:
+          name: Run OWASP Dependency-Check
+          command: |
+            cd EmployeePortal/Backend
+            ~/dependency-check/bin/dependency-check.sh \
+              --project "Employee Portal Backend" \
+              --scan . \
+              --format JSON \
+              --format HTML \
+              --out dependency-check-report \
+              --suppression ../dependency-check-suppressions.xml || true
       - run:
           name: Install and Run Snyk
           command: |
             npm install -g snyk
             cd EmployeePortal/Backend
-            # Snyk will fail if no token, but continue anyway
-            snyk test --json > snyk-report.json 2>/dev/null || echo "Snyk test completed (auth may be required)"
+            snyk auth $SNYK_TOKEN || echo "Snyk token not configured"
+            snyk test --json > snyk-report.json || true
+            snyk monitor || true
       - store_artifacts:
           path: EmployeePortal/Backend/npm-audit-report.json
+      - store_artifacts:
+          path: EmployeePortal/Backend/dependency-check-report
       - store_artifacts:
           path: EmployeePortal/Backend/snyk-report.json
 
   employee-backend-sonarqube:
-    executor: sonarqube-executor
+    executor: node-executor
     steps:
       - checkout
       - install-dependencies:
           project-path: "EmployeePortal/Backend"
-      - setup-sonarqube
-      - run-sonar-scanner:
-          project-path: "EmployeePortal/Backend"
-          project-key: "employee-portal-backend"
-          project-name: "Employee Portal Backend"
+      - sonarcloud/scan:
+          sonar_token_variable_name: SONAR_TOKEN
 
   employee-backend-api-tests:
     executor: node-executor
@@ -397,15 +486,17 @@ jobs:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            echo "MONGODB_URI=mongodb://localhost:27017/test_employee_portal" > .env
-            echo "PORT=8001" >> .env
-            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
-            echo "USE_HTTPS=false" >> .env
+            cat > .env << EOF
+            MONGODB_URI=mongodb://localhost:27017/test_employee_portal
+            PORT=8001
+            JWT_SECRET=test_secret_key_for_ci
+            USE_HTTPS=false
+            EOF
       - run:
           name: Start Employee Backend Server
           command: |
             cd EmployeePortal/Backend
-            npm start &
+            npm start
           background: true
       - run:
           name: Wait for Server to Start
@@ -421,18 +512,82 @@ jobs:
             echo "Server failed to start"
             exit 1
       - run:
-          name: Run Basic API Tests
+          name: Install Newman (Postman CLI)
+          command: npm install -g newman newman-reporter-htmlextra
+      - run:
+          name: Create API Test Collection
           command: |
-            echo "Testing employee API endpoints..."
-            # Simple health check
-            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee || echo "500")
-            if [ "$response" = "200" ]; then
-              echo "Employee API health check: PASSED"
-            else
-              echo "Employee API health check: FAILED (Status: $response)"
-            fi
+            cd EmployeePortal/Backend
+            cat > api-tests.json << 'EOF'
+            {
+              "info": {
+                "name": "Employee Portal API Tests",
+                "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+              },
+              "item": [
+                {
+                  "name": "Health Check",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "http://localhost:8001/api/employee",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8001",
+                      "path": ["api", "employee"]
+                    }
+                  }
+                },
+                {
+                  "name": "Employee Login",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "exec": [
+                          "pm.test('Status code is 200 or 400', function () {",
+                          "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                          "});",
+                          "if (pm.response.code === 200) {",
+                          "    pm.test('Response has token', function () {",
+                          "        var jsonData = pm.response.json();",
+                          "        pm.expect(jsonData).to.have.property('token');",
+                          "        pm.environment.set('employee_token', jsonData.token);",
+                          "    });",
+                          "}"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "POST",
+                    "header": [{"key": "Content-Type", "value": "application/json"}],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\"employeeId\":\"EMP000001\",\"password\":\"TestPass123!\"}"
+                    },
+                    "url": {
+                      "raw": "http://localhost:8001/api/employee/auth/login",
+                      "protocol": "http",
+                      "host": ["localhost"],
+                      "port": "8001",
+                      "path": ["api", "employee", "auth", "login"]
+                    }
+                  }
+                }
+              ]
+            }
+            EOF
+      - run:
+          name: Run API Tests with Newman
+          command: |
+            cd EmployeePortal/Backend
+            newman run api-tests.json \
+              --reporters cli,htmlextra \
+              --reporter-htmlextra-export newman-report.html || true
       - store_artifacts:
-          path: EmployeePortal/Backend
+          path: EmployeePortal/Backend/newman-report.html
 
   employee-frontend-build:
     executor: node-executor
@@ -444,7 +599,7 @@ jobs:
           name: Build Frontend
           command: |
             cd EmployeePortal/Frontend
-            npm run build || echo "Build may have warnings"
+            npm run build
       - persist_to_workspace:
           root: .
           paths:
@@ -461,8 +616,16 @@ jobs:
           command: |
             cd EmployeePortal/Frontend
             npm audit --json > npm-audit-report.json || true
+      - run:
+          name: Install and Run ESLint Security Plugin
+          command: |
+            cd EmployeePortal/Frontend
+            npm install --save-dev eslint-plugin-security
+            npx eslint . --ext .js,.jsx --format json --output-file eslint-report.json || true
       - store_artifacts:
           path: EmployeePortal/Frontend/npm-audit-report.json
+      - store_artifacts:
+          path: EmployeePortal/Frontend/eslint-report.json
 
 # Workflows
 workflows:
@@ -483,6 +646,7 @@ workflows:
       - customer-backend-sonarqube:
           requires:
             - customer-backend-build
+          context: sonarcloud
       - customer-backend-api-tests:
           requires:
             - customer-backend-build
@@ -504,6 +668,7 @@ workflows:
       - employee-backend-sonarqube:
           requires:
             - employee-backend-build
+          context: sonarcloud
       - employee-backend-api-tests:
           requires:
             - employee-backend-build
