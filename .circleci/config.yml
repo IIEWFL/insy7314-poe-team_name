@@ -147,6 +147,22 @@ commands:
             wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
             unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
             
+            SOURCE_DIRS=""
+            [ -d "controllers" ] && SOURCE_DIRS="${SOURCE_DIRS}controllers,"
+            [ -d "models" ] && SOURCE_DIRS="${SOURCE_DIRS}models,"
+            [ -d "routes" ] && SOURCE_DIRS="${SOURCE_DIRS}routes,"
+            [ -d "middleware" ] && SOURCE_DIRS="${SOURCE_DIRS}middleware,"
+            [ -d "src" ] && SOURCE_DIRS="${SOURCE_DIRS}src,"
+            [ -f "server.js" ] && SOURCE_DIRS="${SOURCE_DIRS}server.js,"
+            [ -f "index.js" ] && SOURCE_DIRS="${SOURCE_DIRS}index.js,"
+            SOURCE_DIRS="${SOURCE_DIRS%,}"
+            
+            if [ -z "$SOURCE_DIRS" ]; then
+              SOURCE_DIRS="."
+            fi
+            
+            echo "Scanning directories: $SOURCE_DIRS"
+            
             if [ -n "$SONAR_TOKEN" ] && [ "$SONAR_TOKEN" != "admin" ]; then
               ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
                 -Dsonar.projectKey="<< parameters.project-key >>" \
@@ -154,7 +170,7 @@ commands:
                 -Dsonar.projectVersion=1.0 \
                 -Dsonar.host.url=http://localhost:9000 \
                 -Dsonar.token="$SONAR_TOKEN" \
-                -Dsonar.sources=src,controllers,models,routes,middleware \
+                -Dsonar.sources="$SOURCE_DIRS" \
                 -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.d.ts
             else
               ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
@@ -164,7 +180,7 @@ commands:
                 -Dsonar.host.url=http://localhost:9000 \
                 -Dsonar.login=admin \
                 -Dsonar.password=admin \
-                -Dsonar.sources=src,controllers,models,routes,middleware \
+                -Dsonar.sources="$SOURCE_DIRS" \
                 -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.d.ts
             fi
       - run:
