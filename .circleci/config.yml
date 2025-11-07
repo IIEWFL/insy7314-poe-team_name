@@ -186,24 +186,25 @@ commands:
       - run:
           name: Retrieve SonarQube Results
           command: |
-            echo "Retrieving SonarQube analysis results..."
-            sleep 10
+            cd << parameters.project-path >>
             
-            # Get project measures
+            echo "Retrieving SonarQube analysis results..."
+            sleep 15
+            
             if [ -n "$SONAR_TOKEN" ] && [ "$SONAR_TOKEN" != "admin" ]; then
-              AUTH_HEADER="-H 'Authorization: Bearer $SONAR_TOKEN'"
+              MEASURES=$(curl -s -H "Authorization: Bearer $SONAR_TOKEN" \
+                "http://localhost:9000/api/measures/component?component=<< parameters.project-key >>&metricKeys=bugs,vulnerabilities,code_smells,security_hotspots,coverage,duplicated_lines_density,ncloc,sqale_index")
             else
-              AUTH_HEADER="-u admin:admin"
+              MEASURES=$(curl -s -u admin:admin \
+                "http://localhost:9000/api/measures/component?component=<< parameters.project-key >>&metricKeys=bugs,vulnerabilities,code_smells,security_hotspots,coverage,duplicated_lines_density,ncloc,sqale_index")
             fi
             
-            MEASURES=$(curl -s $AUTH_HEADER \
-              "http://localhost:9000/api/measures/component?component=<< parameters.project-key >>&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density")
-            
             echo "=== SonarQube Analysis Results ==="
-            echo "$MEASURES" | grep -o '"metric":"[^"]*","value":"[^"]*"' | sed 's/"metric":"\([^"]*\)","value":"\([^"]*\)"/\1: \2/g' || echo "Results retrieved"
+            echo "$MEASURES" | python3 -m json.tool 2>/dev/null || echo "$MEASURES"
             
-            # Save results
             echo "$MEASURES" > sonarqube-results.json
+            
+            echo "Dashboard URL: http://localhost:9000/dashboard?id=<< parameters.project-key >>"
       - store_artifacts:
           path: << parameters.project-path >>/sonarqube-results.json
 
