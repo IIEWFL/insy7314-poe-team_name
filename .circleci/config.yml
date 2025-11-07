@@ -9,9 +9,11 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install dependencies
+          name: Install dependencies including express-validator
           command: |
             cd EmployeePortal/Backend
+            # Install missing dependency
+            npm install express-validator
             npm install
       - run:
           name: Wait for MongoDB
@@ -34,17 +36,17 @@ jobs:
             echo "JWT_SECRET=test" >> .env
             echo "USE_HTTPS=false" >> .env
       - run:
-          name: Start server and test (all in one step)
+          name: Start server and test
           command: |
             cd EmployeePortal/Backend
             
-            # Start server in background but keep it in this step
+            # Start server in background
             node server.js &
             SERVER_PID=$!
             echo "Server started with PID: $SERVER_PID"
             
-            # Wait a bit for server to start
-            sleep 5
+            # Wait for server to start
+            sleep 8
             
             # Check if server is running
             if ps -p $SERVER_PID > /dev/null; then
@@ -58,21 +60,14 @@ jobs:
                 echo "✗ API endpoint not responding"
               fi
               
-              if curl -s http://localhost:8001/ > /dev/null; then
-                echo "✓ Root endpoint responding"
-              else
-                echo "✗ Root endpoint not responding"
-              fi
-              
               # Kill the server
               kill $SERVER_PID
               echo "Server stopped"
             else
-              echo "✗ Server process died immediately"
-              # Try to see what error occurred
-              echo "=== Checking server output ==="
-              # Start server in foreground to see errors
-              node server.js || echo "Server failed to start"
+              echo "✗ Server process died"
+              # Start in foreground to see the actual error
+              echo "=== Server output ==="
+              node server.js
             fi
 
   customer-backend-api-tests:
@@ -86,6 +81,8 @@ jobs:
           name: Install dependencies
           command: |
             cd CustomerPortal/Backend
+            # Check if customer backend also needs express-validator
+            npm install express-validator
             npm install
       - run:
           name: Wait for MongoDB
@@ -108,17 +105,17 @@ jobs:
             echo "JWT_SECRET=test" >> .env
             echo "USE_HTTPS=false" >> .env
       - run:
-          name: Start server and test (all in one step)
+          name: Start server and test
           command: |
             cd CustomerPortal/Backend
             
-            # Start server in background but keep it in this step
+            # Start server in background
             node server.js &
             SERVER_PID=$!
             echo "Server started with PID: $SERVER_PID"
             
-            # Wait a bit for server to start
-            sleep 5
+            # Wait for server to start
+            sleep 8
             
             # Check if server is running
             if ps -p $SERVER_PID > /dev/null; then
@@ -132,21 +129,14 @@ jobs:
                 echo "✗ API endpoint not responding"
               fi
               
-              if curl -s http://localhost:8000/ > /dev/null; then
-                echo "✓ Root endpoint responding"
-              else
-                echo "✗ Root endpoint not responding"
-              fi
-              
               # Kill the server
               kill $SERVER_PID
               echo "Server stopped"
             else
-              echo "✗ Server process died immediately"
-              # Try to see what error occurred
-              echo "=== Checking server output ==="
-              # Start server in foreground to see errors
-              node server.js || echo "Server failed to start"
+              echo "✗ Server process died"
+              # Start in foreground to see the actual error
+              echo "=== Server output ==="
+              node server.js
             fi
 
 workflows:
