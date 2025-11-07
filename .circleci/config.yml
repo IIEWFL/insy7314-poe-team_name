@@ -54,17 +54,18 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - v1-deps-<<parameters.project-path>>-{{ checksum "<<parameters.project-path>>/package-lock.json" }}
-            - v1-deps-<<parameters.project-path>>-
+            - v1-deps-<< parameters.project-path >>-{{ checksum "<< parameters.project-path >>/package-lock.json" }}
+            - v1-deps-<< parameters.project-path >>-
       - run:
           name: Install Dependencies
           command: |
-            cd <<parameters.project-path>>
+            cd << parameters.project-path >>
+            # Use npm install instead of npm ci to handle lock file issues
             npm install --legacy-peer-deps
       - save_cache:
-          key: v1-deps-<<parameters.project-path>>-{{ checksum "<<parameters.project-path>>/package-lock.json" }}
+          key: v1-deps-<< parameters.project-path >>-{{ checksum "<< parameters.project-path >>/package-lock.json" }}
           paths:
-            - <<parameters.project-path>>/node_modules
+            - << parameters.project-path >>/node_modules
 
   setup-mongodb-docker:
     description: "Set up MongoDB using Docker"
@@ -73,13 +74,15 @@ commands:
           name: Wait for MongoDB to be ready
           command: |
             echo "Waiting for MongoDB to be ready..."
+            # Simple port check - if port is open, assume MongoDB is ready
             for i in {1..30}; do
               if nc -z localhost 27017; then
                 echo "MongoDB is ready and responsive!"
                 exit 0
+              else
+                echo "Waiting for MongoDB port to open... ($i/30)"
+                sleep 2
               fi
-              echo "Waiting for MongoDB port to open... ($i/30)"
-              sleep 2
             done
             echo "MongoDB failed to start in time"
             exit 1
@@ -115,16 +118,16 @@ commands:
       - run:
           name: Install SonarScanner
           command: |
-            cd <<parameters.project-path>>
+            cd << parameters.project-path >>
             wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
             unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
       - run:
           name: Run SonarQube Analysis
           command: |
-            cd <<parameters.project-path>>
+            cd << parameters.project-path >>
             ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
-              -Dsonar.projectKey=<<parameters.project-key>> \
-              -Dsonar.projectName=<<parameters.project-name>> \
+              -Dsonar.projectKey=<< parameters.project-key >> \
+              -Dsonar.projectName=<< parameters.project-name >> \
               -Dsonar.projectVersion=1.0 \
               -Dsonar.host.url=http://sonarqube:9000 \
               -Dsonar.login=admin \
@@ -132,10 +135,10 @@ commands:
               -Dsonar.sources=src,controllers,models,routes,middleware \
               -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.d.ts
 
-# ==================== JOB DEFINITIONS ====================
-
+# Jobs
 jobs:
-  # -------------------- CUSTOMER PORTAL JOBS --------------------
+  # ==================== CUSTOMER PORTAL JOBS ====================
+  
   customer-backend-build:
     executor: node-executor
     steps:
@@ -170,7 +173,8 @@ jobs:
             semgrep scan --config=auto --json --output=semgrep-report.json || true
       - run:
           name: Install NodeJsScan (SAST)
-          command: pip3 install nodejsscan
+          command: |
+            pip3 install nodejsscan
       - run:
           name: Run NodeJsScan
           command: |
@@ -197,6 +201,7 @@ jobs:
           command: |
             npm install -g snyk
             cd CustomerPortal/Backend
+            # Snyk will fail if no token, but continue anyway
             snyk test --json > snyk-report.json 2>/dev/null || echo "Snyk test completed (auth may be required)"
       - store_artifacts:
           path: CustomerPortal/Backend/npm-audit-report.json
@@ -226,51 +231,94 @@ jobs:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            cat > .env <<EOL
-MONGODB_URI=mongodb://localhost:27017/INSY7314
-PORT=8000
-JWT_SECRET=test_secret_key_for_ci
-USE_HTTPS=false
-EOL
+            # Use local MongoDB for CI testing
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8000" >> .env
+            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
+            echo "USE_HTTPS=false" >> .env
       - run:
-          name: Start Customer Backend Server
+          name: Check if port 8000 is available
+          command: |
+            # Check if port 8000 is already in use
+            if nc -z localhost 8000; then
+              echo "Port 8000 is already in use, attempting to free it..."
+              pkill -f "node.*8000" || true
+              sleep 2
+            fi
+      - run:
+          name: Start Customer Backend Server with logging
           command: |
             cd CustomerPortal/Backend
-            npm start &
+            # Start server with output logging and capture PID
+            npm start > server.log 2>&1 &
             echo $! > server.pid
+            echo "Server started with PID: $(cat server.pid)"
           background: true
       - run:
-          name: Wait for Server to Start
+          name: Wait for Server to Start with better debugging
           command: |
             for i in {1..30}; do
+              # Check if server process is still running
+              if [ ! -f CustomerPortal/Backend/server.pid ] || ! ps -p $(cat CustomerPortal/Backend/server.pid) > /dev/null 2>&1; then
+                echo "Server process died, checking logs..."
+                cat CustomerPortal/Backend/server.log || true
+                echo "Server failed to start - process died"
+                exit 1
+              fi
+              
+              # Check if server is responding
               if curl -s http://localhost:8000 > /dev/null; then
-                echo "Server is ready"
+                echo "Server is ready and responding"
                 exit 0
               fi
+              
+              # Show recent server logs for debugging
+              if [ $i -eq 10 ] || [ $i -eq 20 ]; then
+                echo "--- Server logs at attempt $i ---"
+                tail -20 CustomerPortal/Backend/server.log || true
+                echo "--------------------------------"
+              fi
+              
               echo "Waiting for server... ($i/30)"
               sleep 2
             done
-            echo "Server failed to start"
+            
+            echo "Server failed to start within timeout"
+            echo "--- Final server logs ---"
+            cat CustomerPortal/Backend/server.log || true
+            echo "-------------------------"
             exit 1
       - run:
           name: Run Basic API Tests
           command: |
+            echo "Testing customer API endpoints..."
+            # Simple health check
             response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api || echo "500")
             if [ "$response" = "200" ]; then
               echo "Customer API health check: PASSED"
             else
               echo "Customer API health check: FAILED (Status: $response)"
+              # Show more details about the failure
+              curl -v http://localhost:8000/api || true
             fi
       - run:
-          name: Stop Server
+          name: Stop Server and cleanup
           command: |
             cd CustomerPortal/Backend
             if [ -f server.pid ]; then
-              kill $(cat server.pid) || true
+              echo "Stopping server with PID $(cat server.pid)"
+              kill $(cat server.pid) 2>/dev/null || true
               sleep 2
+              # Force kill if still running
               kill -9 $(cat server.pid) 2>/dev/null || true
               rm -f server.pid
+              echo "Server stopped"
             fi
+            # Show final logs for debugging
+            echo "--- Final server logs ---"
+            cat server.log 2>/dev/null || echo "No server logs found"
+      - store_artifacts:
+          path: CustomerPortal/Backend/server.log
       - store_artifacts:
           path: CustomerPortal/Backend
 
@@ -304,15 +352,226 @@ EOL
       - store_artifacts:
           path: CustomerPortal/Frontend/npm-audit-report.json
 
-# -------------------- EMPLOYEE PORTAL JOBS --------------------
-# The Employee portal jobs mirror the customer portal structure with ports 8001 and folder EmployeePortal
-# (The jobs are identical to the customer portal ones, just folder names and ports updated)
-# For brevity, the full definitions remain the same as you provided and will be fully included in the final CircleCI config
+  # ==================== EMPLOYEE PORTAL JOBS ====================
 
-# ==================== WORKFLOWS ====================
+  employee-backend-build:
+    executor: node-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - persist_to_workspace:
+          root: .
+          paths:
+            - EmployeePortal/Backend
+
+  employee-backend-sast:
+    executor: security-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - run:
+          name: Install Python and pip
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y python3-pip
+      - run:
+          name: Install Semgrep (SAST)
+          command: |
+            python3 -m pip install --upgrade pip
+            pip3 install semgrep
+      - run:
+          name: Run Semgrep SAST Scan
+          command: |
+            cd EmployeePortal/Backend
+            semgrep scan --config=auto --json --output=semgrep-report.json || true
+      - run:
+          name: Install NodeJsScan (SAST)
+          command: |
+            pip3 install nodejsscan
+      - run:
+          name: Run NodeJsScan
+          command: |
+            cd EmployeePortal/Backend
+            nodejsscan --directory . --output nodejsscan-report.json || true
+      - store_artifacts:
+          path: EmployeePortal/Backend/semgrep-report.json
+      - store_artifacts:
+          path: EmployeePortal/Backend/nodejsscan-report.json
+
+  employee-backend-sca:
+    executor: security-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - run:
+          name: Run npm audit
+          command: |
+            cd EmployeePortal/Backend
+            npm audit --json > npm-audit-report.json || true
+      - run:
+          name: Install and Run Snyk
+          command: |
+            npm install -g snyk
+            cd EmployeePortal/Backend
+            # Snyk will fail if no token, but continue anyway
+            snyk test --json > snyk-report.json 2>/dev/null || echo "Snyk test completed (auth may be required)"
+      - store_artifacts:
+          path: EmployeePortal/Backend/npm-audit-report.json
+      - store_artifacts:
+          path: EmployeePortal/Backend/snyk-report.json
+
+  employee-backend-sonarqube:
+    executor: sonarqube-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - setup-sonarqube
+      - run-sonar-scanner:
+          project-path: "EmployeePortal/Backend"
+          project-key: "employee-portal-backend"
+          project-name: "Employee Portal Backend"
+
+  employee-backend-api-tests:
+    executor: node-mongo-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Backend"
+      - setup-mongodb-docker
+      - run:
+          name: Create Test Environment File
+          command: |
+            cd EmployeePortal/Backend
+            # Use local MongoDB for CI testing
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8001" >> .env
+            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
+            echo "USE_HTTPS=false" >> .env
+      - run:
+          name: Check if port 8001 is available
+          command: |
+            # Check if port 8001 is already in use
+            if nc -z localhost 8001; then
+              echo "Port 8001 is already in use, attempting to free it..."
+              pkill -f "node.*8001" || true
+              sleep 2
+            fi
+      - run:
+          name: Start Employee Backend Server with logging
+          command: |
+            cd EmployeePortal/Backend
+            # Start server with output logging and capture PID
+            npm start > server.log 2>&1 &
+            echo $! > server.pid
+            echo "Server started with PID: $(cat server.pid)"
+          background: true
+      - run:
+          name: Wait for Server to Start with better debugging
+          command: |
+            for i in {1..30}; do
+              # Check if server process is still running
+              if [ ! -f EmployeePortal/Backend/server.pid ] || ! ps -p $(cat EmployeePortal/Backend/server.pid) > /dev/null 2>&1; then
+                echo "Server process died, checking logs..."
+                cat EmployeePortal/Backend/server.log || true
+                echo "Server failed to start - process died"
+                exit 1
+              fi
+              
+              # Check if server is responding
+              if curl -s http://localhost:8001 > /dev/null; then
+                echo "Server is ready and responding"
+                exit 0
+              fi
+              
+              # Show recent server logs for debugging
+              if [ $i -eq 10 ] || [ $i -eq 20 ]; then
+                echo "--- Server logs at attempt $i ---"
+                tail -20 EmployeePortal/Backend/server.log || true
+                echo "--------------------------------"
+              fi
+              
+              echo "Waiting for server... ($i/30)"
+              sleep 2
+            done
+            
+            echo "Server failed to start within timeout"
+            echo "--- Final server logs ---"
+            cat EmployeePortal/Backend/server.log || true
+            echo "-------------------------"
+            exit 1
+      - run:
+          name: Run Basic API Tests
+          command: |
+            echo "Testing employee API endpoints..."
+            # Simple health check
+            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee || echo "500")
+            if [ "$response" = "200" ]; then
+              echo "Employee API health check: PASSED"
+            else
+              echo "Employee API health check: FAILED (Status: $response)"
+              # Show more details about the failure
+              curl -v http://localhost:8001/api/employee || true
+            fi
+      - run:
+          name: Stop Server and cleanup
+          command: |
+            cd EmployeePortal/Backend
+            if [ -f server.pid ]; then
+              echo "Stopping server with PID $(cat server.pid)"
+              kill $(cat server.pid) 2>/dev/null || true
+              sleep 2
+              # Force kill if still running
+              kill -9 $(cat server.pid) 2>/dev/null || true
+              rm -f server.pid
+              echo "Server stopped"
+            fi
+            # Show final logs for debugging
+            echo "--- Final server logs ---"
+            cat server.log 2>/dev/null || echo "No server logs found"
+      - store_artifacts:
+          path: EmployeePortal/Backend/server.log
+      - store_artifacts:
+          path: EmployeePortal/Backend
+
+  employee-frontend-build:
+    executor: node-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Frontend"
+      - run:
+          name: Build Frontend
+          command: |
+            cd EmployeePortal/Frontend
+            npm run build || echo "Build may have warnings"
+      - persist_to_workspace:
+          root: .
+          paths:
+            - EmployeePortal/Frontend/build
+
+  employee-frontend-security:
+    executor: security-executor
+    steps:
+      - checkout
+      - install-dependencies:
+          project-path: "EmployeePortal/Frontend"
+      - run:
+          name: Run npm audit on Frontend
+          command: |
+            cd EmployeePortal/Frontend
+            npm audit --json > npm-audit-report.json || true
+      - store_artifacts:
+          path: EmployeePortal/Frontend/npm-audit-report.json
+
+# Workflows
 workflows:
   version: 2
-
+  
+  # Main workflow triggered by GitHub Actions
   github-triggered-pipeline:
     when:
       and:
@@ -333,11 +592,13 @@ workflows:
       - customer-backend-api-tests:
           requires:
             - customer-backend-build
+
       # Customer Portal Frontend
       - customer-frontend-build
       - customer-frontend-security:
           requires:
             - customer-frontend-build
+
       # Employee Portal Backend
       - employee-backend-build
       - employee-backend-sast:
@@ -352,17 +613,19 @@ workflows:
       - employee-backend-api-tests:
           requires:
             - employee-backend-build
+
       # Employee Portal Frontend
       - employee-frontend-build
       - employee-frontend-security:
           requires:
             - employee-frontend-build
 
+  # Fallback workflow that always runs (for direct CircleCI triggers)
   direct-pipeline:
     when:
       not: << pipeline.parameters.GHA_Action >>
     jobs:
-      # Mirror the jobs above for direct CircleCI triggers
+      # Customer Portal Backend
       - customer-backend-build
       - customer-backend-sast:
           requires:
@@ -376,10 +639,14 @@ workflows:
       - customer-backend-api-tests:
           requires:
             - customer-backend-build
+
+      # Customer Portal Frontend
       - customer-frontend-build
       - customer-frontend-security:
           requires:
             - customer-frontend-build
+
+      # Employee Portal Backend
       - employee-backend-build
       - employee-backend-sast:
           requires:
@@ -393,6 +660,8 @@ workflows:
       - employee-backend-api-tests:
           requires:
             - employee-backend-build
+
+      # Employee Portal Frontend
       - employee-frontend-build
       - employee-frontend-security:
           requires:
