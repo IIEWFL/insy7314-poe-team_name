@@ -37,6 +37,12 @@ executors:
       - image: sonarqube:community
     working_directory: ~/project
 
+  node-mongo-executor:
+    docker:
+      - image: cimg/node:20.10.0
+      - image: mongo:6.0
+    working_directory: ~/project
+
 # Reusable commands
 commands:
   install-dependencies:
@@ -59,6 +65,55 @@ commands:
           key: v1-deps-<< parameters.project-path >>-{{ checksum "<< parameters.project-path >>/package-lock.json" }}
           paths:
             - << parameters.project-path >>/node_modules
+
+  setup-mongodb-docker:
+    description: "Set up MongoDB using Docker"
+    parameters:
+      project-path:
+        type: string
+    steps:
+      - run:
+          name: Wait for MongoDB to be ready
+          command: |
+            echo "Waiting for MongoDB to be ready..."
+            # First check if MongoDB port is open
+            for i in {1..30}; do
+              if nc -z localhost 27017; then
+                echo "MongoDB port is open"
+                # Now test connection using the project's installed mongodb module
+                cd << parameters.project-path >>
+                if node -e "
+                const { MongoClient } = require('mongodb');
+                const uri = 'mongodb://localhost:27017/INSY7314';
+                async function testConnection() {
+                  try {
+                    const client = new MongoClient(uri);
+                    await client.connect();
+                    const result = await client.db().admin().ping();
+                    console.log('MongoDB connection successful:', result);
+                    await client.close();
+                    return true;
+                  } catch (error) {
+                    console.log('MongoDB connection failed:', error.message);
+                    return false;
+                  }
+                }
+                testConnection().then(success => {
+                  process.exit(success ? 0 : 1);
+                });
+                "; then
+                  echo "MongoDB is ready and responsive!"
+                  exit 0
+                else
+                  echo "MongoDB port open but connection failed, retrying..."
+                fi
+              else
+                echo "Waiting for MongoDB port to open... ($i/30)"
+              fi
+              sleep 2
+            done
+            echo "MongoDB failed to start or become responsive"
+            exit 1
 
   setup-sonarqube:
     description: "Set up and wait for SonarQube to be ready"
@@ -107,38 +162,6 @@ commands:
               -Dsonar.password=admin \
               -Dsonar.sources=src,controllers,models,routes,middleware \
               -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.d.ts
-
-  test-mongodb-atlas-connection:
-    description: "Test MongoDB Atlas connection"
-    parameters:
-      project-path:
-        type: string
-    steps:
-      - run:
-          name: Test MongoDB Atlas Connection
-          command: |
-            cd << parameters.project-path >>
-            # Test MongoDB Atlas connection using the project's dependencies
-            node -e "
-            const { MongoClient } = require('mongodb');
-            const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/INSY7314';
-            async function testConnection() {
-              try {
-                const client = new MongoClient(uri);
-                await client.connect();
-                const result = await client.db().admin().ping();
-                console.log('MongoDB Atlas connection successful:', result);
-                await client.close();
-                return true;
-              } catch (error) {
-                console.log('MongoDB Atlas connection failed:', error.message);
-                return false;
-              }
-            }
-            testConnection().then(success => {
-              process.exit(success ? 0 : 1);
-            });
-            "
 
 # Jobs
 jobs:
@@ -226,22 +249,22 @@ jobs:
           project-name: "Customer Portal Backend"
 
   customer-backend-api-tests:
-    executor: node-executor
+    executor: node-mongo-executor
     steps:
       - checkout
       - install-dependencies:
           project-path: "CustomerPortal/Backend"
-      - test-mongodb-atlas-connection:
+      - setup-mongodb-docker:
           project-path: "CustomerPortal/Backend"
       - run:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            # Use MongoDB Atlas for testing (will use MONGODB_URI from environment variables)
-            echo "PORT=8000" > .env
+            # Use local MongoDB for CI testing
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8000" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
-            # MONGODB_URI should be set as an environment variable in CircleCI
       - run:
           name: Start Customer Backend Server
           command: |
@@ -389,22 +412,22 @@ jobs:
           project-name: "Employee Portal Backend"
 
   employee-backend-api-tests:
-    executor: node-executor
+    executor: node-mongo-executor
     steps:
       - checkout
       - install-dependencies:
           project-path: "EmployeePortal/Backend"
-      - test-mongodb-atlas-connection:
+      - setup-mongodb-docker:
           project-path: "EmployeePortal/Backend"
       - run:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            # Use MongoDB Atlas for testing (will use MONGODB_URI from environment variables)
-            echo "PORT=8001" > .env
+            # Use local MongoDB for CI testing
+            echo "MONGODB_URI=mongodb://localhost:27017/INSY7314" > .env
+            echo "PORT=8001" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
-            # MONGODB_URI should be set as an environment variable in CircleCI
       - run:
           name: Start Employee Backend Server
           command: |
