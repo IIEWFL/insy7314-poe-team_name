@@ -252,4 +252,3 @@ export default {
   getMyPayments
 };
 
-eval("console.log('test')");
