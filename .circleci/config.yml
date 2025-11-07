@@ -70,11 +70,21 @@ commands:
     description: "Set up MongoDB using Docker"
     steps:
       - run:
+          name: Install MongoDB client tools
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y wget gnupg
+            wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
+            echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+            sudo apt-get update
+            sudo apt-get install -y mongodb-mongosh
+      - run:
           name: Wait for MongoDB to be ready
           command: |
             echo "Waiting for MongoDB to be ready..."
             for i in {1..30}; do
-              if mongosh --host localhost --port 27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+              # Use the Docker container name (mongo-0) to connect
+              if mongosh --host mongo-0 --port 27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
                 echo "MongoDB is ready!"
                 exit 0
               fi
@@ -228,7 +238,8 @@ jobs:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            echo "MONGODB_URI=mongodb://localhost:27017/test_customer_portal" > .env
+            # Use the Docker container name for MongoDB connection
+            echo "MONGODB_URI=mongodb://mongo-0:27017/test_customer_portal" > .env
             echo "PORT=8000" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
@@ -389,7 +400,8 @@ jobs:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            echo "MONGODB_URI=mongodb://localhost:27017/test_employee_portal" > .env
+            # Use the Docker container name for MongoDB connection
+            echo "MONGODB_URI=mongodb://mongo-0:27017/test_employee_portal" > .env
             echo "PORT=8001" >> .env
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
