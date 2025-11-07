@@ -68,6 +68,10 @@ commands:
 
   setup-mongodb-docker:
     description: "Set up MongoDB using Docker"
+    parameters:
+      project-path:
+        type: string
+        default: ""
     steps:
       - run:
           name: Wait for MongoDB to be ready
@@ -77,7 +81,7 @@ commands:
             for i in {1..30}; do
               if nc -z localhost 27017; then
                 echo "MongoDB port is open, testing connection..."
-                # Now test with Node.js MongoDB driver
+                # Now test with Node.js MongoDB driver (dependencies should be installed)
                 if node -e "
                 const { MongoClient } = require('mongodb');
                 const uri = 'mongodb://localhost:27017/INSY7314';
@@ -249,8 +253,9 @@ jobs:
     steps:
       - checkout
       - install-dependencies:
+          project-path: "CustomerPortal/Backend"  # Dependencies installed FIRST
+      - setup-mongodb-docker:  # Now MongoDB connection test has access to mongodb driver
           project-path: "CustomerPortal/Backend"
-      - setup-mongodb-docker
       - run:
           name: Create Test Environment File
           command: |
@@ -411,8 +416,9 @@ jobs:
     steps:
       - checkout
       - install-dependencies:
+          project-path: "EmployeePortal/Backend"  # Dependencies installed FIRST
+      - setup-mongodb-docker:  # Now MongoDB connection test has access to mongodb driver
           project-path: "EmployeePortal/Backend"
-      - setup-mongodb-docker
       - run:
           name: Create Test Environment File
           command: |
