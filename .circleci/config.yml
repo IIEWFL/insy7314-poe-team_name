@@ -468,7 +468,7 @@ jobs:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            cat > .env << 'EOF'
+            cat > .env \<< 'EOF'
             MONGODB_URI=mongodb://localhost:27017/test_employee_portal
             PORT=8001
             JWT_SECRET=test_secret_key_for_ci
@@ -500,7 +500,7 @@ jobs:
           name: Create API Test Collection
           command: |
             cd EmployeePortal/Backend
-            cat > api-tests.json << 'EOF'
+            cat > api-tests.json \<< 'EOF'
             {
               "info": {
                 "name": "Employee Portal API Tests",
