@@ -522,10 +522,10 @@ workflows:
   
   # Main workflow triggered by GitHub Actions
   github-triggered-pipeline:
-    when: 
+    when:
       and:
         - not:
-            equals: { << pipeline.parameters.GHA_Action >>, null }
+            equals: [<< pipeline.parameters.GHA_Action >>, null]
     jobs:
       # Customer Portal Backend
       - customer-backend-build
