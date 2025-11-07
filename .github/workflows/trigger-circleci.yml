@@ -35,14 +35,14 @@ jobs:
             echo '{"error": "No package.json found"}' > npm-audit-customer.json
           fi
       
-      - name: Install Employee Backend Dependencies
+      - name: Install Employee Backend Dependencies with Legacy Peer Deps
         working-directory: EmployeePortal/Backend
         run: |
           echo "Installing dependencies for Employee Portal Backend..."
           if [ -f "package.json" ]; then
-            npm ci || npm install
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
             echo "Running npm audit for Employee Portal..."
-            npm audit --json > npm-audit-employee.json || true
+            npm audit --json --legacy-peer-deps > npm-audit-employee.json || true
           else
             echo "package.json not found in EmployeePortal/Backend"
             echo '{"error": "No package.json found"}' > npm-audit-employee.json
@@ -56,9 +56,7 @@ jobs:
       - name: Run Semgrep SAST Scan
         run: |
           echo "Running Semgrep scan..."
-          # SARIF output for GitHub Code Scanning
           semgrep scan --config=p/javascript --sarif --output=semgrep-results.sarif CustomerPortal/Backend EmployeePortal/Backend || echo "Semgrep scan completed with issues"
-          # Human-readable summary
           semgrep scan --config=p/javascript --json CustomerPortal/Backend EmployeePortal/Backend > semgrep-temp.json || echo '{"runs":[]}' > semgrep-temp.json
           jq -r '.runs[].results[] | "Rule: \(.rule_id)\nFile: \(.path)\nLine: \(.start.line)\nMessage: \(.extra.message)\n---"' semgrep-temp.json > semgrep-results.txt || echo "No findings" > semgrep-results.txt
           rm -f semgrep-temp.json
@@ -106,20 +104,20 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ -f "semgrep-results.sarif" ]; then
-            echo "✅ Semgrep SAST scan completed" >> $GITHUB_STEP_SUMMARY
+            echo "Semgrep SAST scan completed" >> $GITHUB_STEP_SUMMARY
             echo "Human-readable findings saved to semgrep-results.txt" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Semgrep SAST scan failed" >> $GITHUB_STEP_SUMMARY
+            echo "Semgrep SAST scan failed" >> $GITHUB_STEP_SUMMARY
           fi
           
           if [ -f "CustomerPortal/Backend/npm-audit-customer.json" ] && [ -f "EmployeePortal/Backend/npm-audit-employee.json" ]; then
-            echo "✅ npm audit completed for both portals" >> $GITHUB_STEP_SUMMARY
+            echo "npm audit completed for both portals" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ npm audit failed for one or both portals" >> $GITHUB_STEP_SUMMARY
+            echo "npm audit failed for one or both portals" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🚀 Full security pipeline running on CircleCI..." >> $GITHUB_STEP_SUMMARY
+          echo "Full security pipeline running on CircleCI..." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "View detailed results in CircleCI dashboard" >> $GITHUB_STEP_SUMMARY
 
@@ -145,23 +143,21 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The following tests are running on CircleCI:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Customer Portal Backend" >> $GITHUB_STEP_SUMMARY
+          echo "Customer Portal Backend" >> $GITHUB_STEP_SUMMARY
           echo "- SAST: Semgrep, NodeJsScan" >> $GITHUB_STEP_SUMMARY
           echo "- SCA: npm audit, OWASP Dependency-Check, Snyk" >> $GITHUB_STEP_SUMMARY
           echo "- SonarQube: Code quality & security hotspots" >> $GITHUB_STEP_SUMMARY
           echo "- API Tests: Newman + OWASP ZAP" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Employee Portal Backend" >> $GITHUB_STEP_SUMMARY
+          echo "Employee Portal Backend" >> $GITHUB_STEP_SUMMARY
           echo "- SAST: Semgrep, NodeJsScan" >> $GITHUB_STEP_SUMMARY
           echo "- SCA: npm audit, OWASP Dependency-Check, Snyk" >> $GITHUB_STEP_SUMMARY
           echo "- SonarQube: Code quality & security hotspots" >> $GITHUB_STEP_SUMMARY
           echo "- API Tests: Newman" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Frontend Security" >> $GITHUB_STEP_SUMMARY
+          echo "Frontend Security" >> $GITHUB_STEP_SUMMARY
           echo "- SCA: npm audit (Customer & Employee)" >> $GITHUB_STEP_SUMMARY
           echo "- Build: Verification" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "View Full Results on CircleCI: https://app.circleci.com/pipelines/github/${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -184,16 +180,16 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "All security scans have been initiated:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Quick scans completed on GitHub Actions" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔄 Comprehensive tests running on CircleCI" >> $GITHUB_STEP_SUMMARY
+          echo "- Quick scans completed on GitHub Actions" >> $GITHUB_STEP_SUMMARY
+          echo "- Comprehensive tests running on CircleCI" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Where to Find Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### GitHub (Immediate Results)" >> $GITHUB_STEP_SUMMARY
+          echo "GitHub (Immediate Results)" >> $GITHUB_STEP_SUMMARY
           echo "- Security Tab → Code Scanning (Semgrep SARIF)" >> $GITHUB_STEP_SUMMARY
           echo "- Artifacts → Quick scan reports" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### CircleCI (Comprehensive Results)" >> $GITHUB_STEP_SUMMARY
+          echo "CircleCI (Comprehensive Results)" >> $GITHUB_STEP_SUMMARY
           echo "- SonarQube quality metrics" >> $GITHUB_STEP_SUMMARY
           echo "- OWASP Dependency-Check reports" >> $GITHUB_STEP_SUMMARY
           echo "- Newman API test results (HTML)" >> $GITHUB_STEP_SUMMARY
