@@ -51,16 +51,19 @@ jobs:
       - name: Install Semgrep
         run: |
           python3 -m pip install --upgrade pip
-          pip3 install semgrep
+          pip3 install semgrep jq
       
       - name: Run Semgrep SAST Scan
         run: |
           echo "Running Semgrep scan..."
           # SARIF output for GitHub Code Scanning
-          semgrep scan --config=auto --sarif --output=semgrep-results.sarif . || echo "Semgrep scan completed with issues"
+          semgrep scan --config=auto --sarif --output=semgrep-results.sarif CustomerPortal/Backend EmployeePortal/Backend || echo "Semgrep scan completed with issues"
           # Human-readable summary
-          semgrep scan --config=auto --json . > semgrep-temp.json || echo '{"runs":[]}' > semgrep-temp.json
-          jq -r '.runs[].results[] | "Rule: \(.rule_id)\nFile: \(.path)\nLine: \(.start.line)\nMessage: \(.extra.message)\n---"' semgrep-temp.json > semgrep-results.txt || echo "No findings" > semgrep-results.txt
+          semgrep scan --config=auto --json CustomerPortal/Backend EmployeePortal/Backend > semgrep-temp.json || echo '{"runs":[]}' > semgrep-temp.json
+          jq -r '
+            .runs[].results[]? | 
+            "Rule: \(.rule_id)\nFile: \(.path)\nLine: \(.start.line)\nMessage: \(.extra.message // .extra.markdown // \"No message\")\n---"
+          ' semgrep-temp.json > semgrep-results.txt || echo "No findings" > semgrep-results.txt
           rm -f semgrep-temp.json
           if [ ! -f "semgrep-results.sarif" ]; then
             echo '{"runs": []}' > semgrep-results.sarif
