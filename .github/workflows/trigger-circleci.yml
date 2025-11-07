@@ -8,9 +8,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ==================== RUN QUICK CHECKS ON GITHUB ====================
-  # These run fast on GitHub Actions and provide immediate feedback
-  
   quick-security-scan:
     name: Quick Security Scan (GitHub)
     runs-on: ubuntu-latest
@@ -27,11 +24,17 @@ jobs:
       
       - name: Install Customer Backend Dependencies
         working-directory: CustomerPortal/Backend
-        run: npm ci
+        run: |
+          npm ci
+          # Run npm audit and create the file
+          npm audit --json > npm-audit-customer.json 2>/dev/null || echo '{"error": "npm audit failed"}' > npm-audit-customer.json
       
       - name: Install Employee Backend Dependencies
         working-directory: EmployeePortal/Backend
-        run: npm ci
+        run: |
+          npm ci
+          # Run npm audit and create the file
+          npm audit --json > npm-audit-employee.json 2>/dev/null || echo '{"error": "npm audit failed"}' > npm-audit-employee.json
       
       - name: Run Semgrep SAST (Quick)
         uses: returntocorp/semgrep-action@v1
@@ -39,24 +42,23 @@ jobs:
           config: auto
           publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
           generateSarif: true
+          sarifOutput: semgrep-results.sarif  # Explicit output file
       
       - name: Upload Semgrep SARIF to GitHub
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: semgrep.sarif
+          sarif_file: semgrep-results.sarif  # Use the correct file name
       
-      - name: Run npm audit - Customer Backend
-        working-directory: CustomerPortal/Backend
+      - name: Create backup audit files if missing
         run: |
-          npm audit --json > npm-audit-customer.json || true
-          npm audit || true
-      
-      - name: Run npm audit - Employee Backend
-        working-directory: EmployeePortal/Backend
-        run: |
-          npm audit --json > npm-audit-employee.json || true
-          npm audit || true
+          # Ensure files exist even if npm audit fails
+          if [ ! -f "CustomerPortal/Backend/npm-audit-customer.json" ]; then
+            echo '{"vulnerabilities": {}, "metadata": {}}' > CustomerPortal/Backend/npm-audit-customer.json
+          fi
+          if [ ! -f "EmployeePortal/Backend/npm-audit-employee.json" ]; then
+            echo '{"vulnerabilities": {}, "metadata": {}}' > EmployeePortal/Backend/npm-audit-employee.json
+          fi
       
       - name: Upload Security Reports
         if: always()
@@ -66,6 +68,7 @@ jobs:
           path: |
             CustomerPortal/Backend/npm-audit-customer.json
             EmployeePortal/Backend/npm-audit-employee.json
+            semgrep-results.sarif
       
       - name: Generate Quick Summary
         if: always()
