@@ -266,12 +266,10 @@ jobs:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            cat > .env << EOF
-            MONGODB_URI=mongodb://localhost:27017/test_customer_portal
-            PORT=8000
-            JWT_SECRET=test_secret_key_for_ci
-            USE_HTTPS=false
-            EOF
+            echo "MONGODB_URI=mongodb://localhost:27017/test_customer_portal" > .env
+            echo "PORT=8000" >> .env
+            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
+            echo "USE_HTTPS=false" >> .env
       - run:
           name: Start Customer Backend Server
           command: |
@@ -559,12 +557,10 @@ jobs:
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            cat > .env << EOF
-            MONGODB_URI=mongodb://localhost:27017/test_employee_portal
-            PORT=8001
-            JWT_SECRET=test_secret_key_for_ci
-            USE_HTTPS=false
-            EOF
+            echo "MONGODB_URI=mongodb://localhost:27017/test_employee_portal" > .env
+            echo "PORT=8001" >> .env
+            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
+            echo "USE_HTTPS=false" >> .env
       - run:
           name: Start Employee Backend Server
           command: |
