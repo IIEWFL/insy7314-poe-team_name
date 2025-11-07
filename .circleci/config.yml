@@ -233,25 +233,24 @@ jobs:
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
       - run:
-          name: Check if port 8000 is available
+          name: Kill any existing processes on port 8000
           command: |
-            if nc -z localhost 8000; then
-              echo "Port 8000 is already in use, attempting to free it..."
-              pkill -f "node.*8000" || true
-              sleep 2
-            fi
+            # Kill any process using port 8000
+            sudo lsof -ti:8000 | xargs -r kill -9 || true
+            sleep 2
       - run:
-          name: Start Customer Backend Server with logging
+          name: Start Customer Backend Server directly with node
           command: |
             cd CustomerPortal/Backend
-            npm start > server.log 2>&1 &
+            node server.js > server.log 2>&1 &
             echo $! > server.pid
             echo "Server started with PID: $(cat server.pid)"
           background: true
       - run:
-          name: Wait for Server to Start
+          name: Wait for Server API to be ready
           command: |
             for i in {1..30}; do
+              # Check if server process is still running
               if [ ! -f CustomerPortal/Backend/server.pid ] || ! ps -p $(cat CustomerPortal/Backend/server.pid) > /dev/null 2>&1; then
                 echo "Server process died, checking logs..."
                 cat CustomerPortal/Backend/server.log || true
@@ -259,58 +258,48 @@ jobs:
                 exit 1
               fi
               
-              if curl -f -s http://localhost:8000 > /dev/null 2>&1; then
-                echo "Server root endpoint is responding"
+              # Check if the actual API endpoint is responding (expecting 404/401 is fine, just not connection refused)
+              if curl -s http://localhost:8000/api/customer > /dev/null 2>&1; then
+                echo "Customer API endpoint is responding"
                 exit 0
               fi
               
-              if curl -s http://localhost:8000/api > /dev/null 2>&1; then
-                echo "Server API endpoint is responding"
-                exit 0
-              fi
-              
-              echo "Waiting for server... ($i/30)"
+              echo "Waiting for customer API... ($i/30)"
               sleep 2
             done
             
-            echo "Server failed to start within timeout"
+            echo "Customer API failed to start within timeout"
             echo "--- Final server logs ---"
             cat CustomerPortal/Backend/server.log || true
             echo "-------------------------"
             exit 1
       - run:
-          name: Test Actual API Endpoints
+          name: Test Customer API Endpoints
           command: |
             echo "Testing customer API endpoints..."
             
-            if curl -s http://localhost:8000 > /dev/null; then
-              echo "✓ Server is running and responding on root endpoint"
-            else
-              echo "✗ Server root endpoint not responding"
-              exit 1
-            fi
-            
-            response_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api)
-            echo "API endpoint /api returned HTTP $response_code"
+            # Test the actual API endpoint
+            response_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customer)
+            echo "Customer API endpoint returned HTTP $response_code"
             
             if [ "$response_code" != "000" ]; then
-              echo "✓ API endpoint is responding (HTTP $response_code)"
+              echo "✓ Customer API endpoint is responding"
             else
-              echo "✗ API endpoint not responding"
+              echo "✗ Customer API endpoint not responding"
               exit 1
             fi
       - run:
-          name: Stop Server and cleanup
+          name: Stop Server
           command: |
             cd CustomerPortal/Backend
             if [ -f server.pid ]; then
               echo "Stopping server with PID $(cat server.pid)"
               kill $(cat server.pid) 2>/dev/null || true
               sleep 2
-              kill -9 $(cat server.pid) 2>/dev/null || true
-              rm -f server.pid
-              echo "Server stopped"
             fi
+            # Force kill any process on port 8000
+            sudo lsof -ti:8000 | xargs -r kill -9 || true
+            echo "Server stopped"
             echo "--- Final server logs ---"
             cat server.log 2>/dev/null || echo "No server logs found"
       - store_artifacts:
@@ -446,25 +435,24 @@ jobs:
             echo "JWT_SECRET=test_secret_key_for_ci" >> .env
             echo "USE_HTTPS=false" >> .env
       - run:
-          name: Check if port 8001 is available
+          name: Kill any existing processes on port 8001
           command: |
-            if nc -z localhost 8001; then
-              echo "Port 8001 is already in use, attempting to free it..."
-              pkill -f "node.*8001" || true
-              sleep 2
-            fi
+            # Kill any process using port 8001
+            sudo lsof -ti:8001 | xargs -r kill -9 || true
+            sleep 2
       - run:
-          name: Start Employee Backend Server with logging
+          name: Start Employee Backend Server directly with node
           command: |
             cd EmployeePortal/Backend
-            npm start > server.log 2>&1 &
+            node server.js > server.log 2>&1 &
             echo $! > server.pid
             echo "Server started with PID: $(cat server.pid)"
           background: true
       - run:
-          name: Wait for Server to Start
+          name: Wait for Server API to be ready
           command: |
             for i in {1..30}; do
+              # Check if server process is still running
               if [ ! -f EmployeePortal/Backend/server.pid ] || ! ps -p $(cat EmployeePortal/Backend/server.pid) > /dev/null 2>&1; then
                 echo "Server process died, checking logs..."
                 cat EmployeePortal/Backend/server.log || true
@@ -472,58 +460,48 @@ jobs:
                 exit 1
               fi
               
-              if curl -f -s http://localhost:8001 > /dev/null 2>&1; then
-                echo "Server root endpoint is responding"
-                exit 0
-              fi
-              
+              # Check if the actual API endpoint is responding (expecting 404/401 is fine, just not connection refused)
               if curl -s http://localhost:8001/api/employee > /dev/null 2>&1; then
-                echo "Server API endpoint is responding"
+                echo "Employee API endpoint is responding"
                 exit 0
               fi
               
-              echo "Waiting for server... ($i/30)"
+              echo "Waiting for employee API... ($i/30)"
               sleep 2
             done
             
-            echo "Server failed to start within timeout"
+            echo "Employee API failed to start within timeout"
             echo "--- Final server logs ---"
             cat EmployeePortal/Backend/server.log || true
             echo "-------------------------"
             exit 1
       - run:
-          name: Test Actual API Endpoints
+          name: Test Employee API Endpoints
           command: |
             echo "Testing employee API endpoints..."
             
-            if curl -s http://localhost:8001 > /dev/null; then
-              echo "✓ Server is running and responding on root endpoint"
-            else
-              echo "✗ Server root endpoint not responding"
-              exit 1
-            fi
-            
+            # Test the actual API endpoint
             response_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee)
-            echo "API endpoint /api/employee returned HTTP $response_code"
+            echo "Employee API endpoint returned HTTP $response_code"
             
             if [ "$response_code" != "000" ]; then
-              echo "✓ API endpoint is responding (HTTP $response_code)"
+              echo "✓ Employee API endpoint is responding"
             else
-              echo "✗ API endpoint not responding"
+              echo "✗ Employee API endpoint not responding"
               exit 1
             fi
       - run:
-          name: Stop Server and cleanup
+          name: Stop Server
           command: |
             cd EmployeePortal/Backend
             if [ -f server.pid ]; then
               echo "Stopping server with PID $(cat server.pid)"
               kill $(cat server.pid) 2>/dev/null || true
               sleep 2
-              kill -9 $(cat server.pid) 2>/dev/null || true
-              rm -f server.pid
-              echo "Server stopped"
             fi
+            # Force kill any process on port 8001
+            sudo lsof -ti:8001 | xargs -r kill -9 || true
+            echo "Server stopped"
             echo "--- Final server logs ---"
             cat server.log 2>/dev/null || echo "No server logs found"
       - store_artifacts:
