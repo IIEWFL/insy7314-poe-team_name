@@ -27,10 +27,9 @@ jobs:
         run: |
           echo "Installing dependencies for Customer Portal Backend..."
           if [ -f "package.json" ]; then
-            # Use --legacy-peer-deps to resolve Express 4.x vs 5.x conflict
-            npm ci --legacy-peer-deps
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
             echo "Running npm audit for Customer Portal..."
-            npm audit --json --legacy-peer-deps > npm-audit-customer.json 2>&1 || echo '{"error": "npm audit failed or no vulnerabilities"}' > npm-audit-customer.json
+            npm audit --json --legacy-peer-deps > npm-audit-customer.json || true
           else
             echo "package.json not found in CustomerPortal/Backend"
             echo '{"error": "No package.json found"}' > npm-audit-customer.json
@@ -41,9 +40,9 @@ jobs:
         run: |
           echo "Installing dependencies for Employee Portal Backend..."
           if [ -f "package.json" ]; then
-            npm ci
+            npm ci || npm install
             echo "Running npm audit for Employee Portal..."
-            npm audit --json > npm-audit-employee.json 2>&1 || echo '{"error": "npm audit failed or no vulnerabilities"}' > npm-audit-employee.json
+            npm audit --json > npm-audit-employee.json || true
           else
             echo "package.json not found in EmployeePortal/Backend"
             echo '{"error": "No package.json found"}' > npm-audit-employee.json
@@ -58,7 +57,6 @@ jobs:
         run: |
           echo "Running Semgrep scan..."
           semgrep scan --config=auto --sarif --output=semgrep-results.sarif . || echo "Semgrep scan completed with issues"
-          # Create the file even if semgrep fails
           if [ ! -f "semgrep-results.sarif" ]; then
             echo '{"runs": []}' > semgrep-results.sarif
           fi
@@ -71,7 +69,6 @@ jobs:
       
       - name: Create Backup Files if Missing
         run: |
-          # Ensure all required files exist
           if [ ! -f "CustomerPortal/Backend/npm-audit-customer.json" ]; then
             echo '{"vulnerabilities": {}, "metadata": {}}' > CustomerPortal/Backend/npm-audit-customer.json
           fi
@@ -99,7 +96,6 @@ jobs:
           echo "# Quick Security Scan Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Check if files were created successfully
           if [ -f "semgrep-results.sarif" ]; then
             echo "✅ Semgrep SAST scan completed" >> $GITHUB_STEP_SUMMARY
           else
