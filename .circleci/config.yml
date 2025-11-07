@@ -13,10 +13,10 @@ jobs:
             - v1-deps-EmployeePortal/Backend-{{ checksum "EmployeePortal/Backend/package-lock.json" }}
             - v1-deps-EmployeePortal/Backend-
       - run:
-          name: Install dependencies with missing packages
+          name: Install ALL missing dependencies
           command: |
             cd EmployeePortal/Backend
-            npm install express-validator express-brute --legacy-peer-deps
+            npm install express-validator express-brute express-brute-mongoose --legacy-peer-deps
             npm install --legacy-peer-deps
       - save_cache:
           key: v1-deps-EmployeePortal/Backend-{{ checksum "EmployeePortal/Backend/package-lock.json" }}
@@ -84,10 +84,10 @@ jobs:
             - v1-deps-CustomerPortal/Backend-{{ checksum "CustomerPortal/Backend/package-lock.json" }}
             - v1-deps-CustomerPortal/Backend-
       - run:
-          name: Install dependencies with missing packages
+          name: Install ALL missing dependencies
           command: |
             cd CustomerPortal/Backend
-            npm install express-validator express-brute --legacy-peer-deps
+            npm install express-validator express-brute express-brute-mongoose --legacy-peer-deps
             npm install --legacy-peer-deps
       - save_cache:
           key: v1-deps-CustomerPortal/Backend-{{ checksum "CustomerPortal/Backend/package-lock.json" }}
