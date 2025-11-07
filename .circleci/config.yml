@@ -73,32 +73,42 @@ commands:
           name: Wait for MongoDB to be ready
           command: |
             echo "Waiting for MongoDB to be ready..."
-            # Use the MongoDB Node.js driver to test connection
+            # Simple connection test using netcat to check if port is open
             for i in {1..30}; do
-              if node -e "
-              const { MongoClient } = require('mongodb');
-              async function test() {
-                try {
-                  const client = new MongoClient('mongodb://localhost:27017/INSY7314');
-                  await client.connect();
-                  await client.db().admin().ping();
-                  await client.close();
-                  console.log('MongoDB is ready!');
-                  process.exit(0);
-                } catch (err) {
-                  console.log('MongoDB not ready yet:', err.message);
-                  process.exit(1);
+              if nc -z localhost 27017; then
+                echo "MongoDB port is open, testing connection..."
+                # Now test with Node.js MongoDB driver
+                if node -e "
+                const { MongoClient } = require('mongodb');
+                const uri = 'mongodb://localhost:27017/INSY7314';
+                async function testConnection() {
+                  try {
+                    const client = new MongoClient(uri);
+                    await client.connect();
+                    const result = await client.db().admin().ping();
+                    console.log('MongoDB connection successful:', result);
+                    await client.close();
+                    return true;
+                  } catch (error) {
+                    console.log('MongoDB connection failed:', error.message);
+                    return false;
+                  }
                 }
-              }
-              test();
-              " 2>/dev/null; then
-                echo "MongoDB connection successful!"
-                exit 0
+                testConnection().then(success => {
+                  process.exit(success ? 0 : 1);
+                });
+                "; then
+                  echo "MongoDB is ready and responsive!"
+                  exit 0
+                else
+                  echo "MongoDB port open but connection failed, retrying..."
+                fi
+              else
+                echo "Waiting for MongoDB port to open... ($i/30)"
               fi
-              echo "Waiting for MongoDB... ($i/30)"
               sleep 2
             done
-            echo "MongoDB failed to start"
+            echo "MongoDB failed to start or become responsive"
             exit 1
 
   setup-sonarqube:
