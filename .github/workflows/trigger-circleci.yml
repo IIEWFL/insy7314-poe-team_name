@@ -56,7 +56,12 @@ jobs:
       - name: Run Semgrep SAST Scan
         run: |
           echo "Running Semgrep scan..."
+          # SARIF output for GitHub Code Scanning
           semgrep scan --config=auto --sarif --output=semgrep-results.sarif . || echo "Semgrep scan completed with issues"
+          # Human-readable summary
+          semgrep scan --config=auto --json . > semgrep-temp.json || echo '{"runs":[]}' > semgrep-temp.json
+          jq -r '.runs[].results[] | "Rule: \(.rule_id)\nFile: \(.path)\nLine: \(.start.line)\nMessage: \(.extra.message)\n---"' semgrep-temp.json > semgrep-results.txt || echo "No findings" > semgrep-results.txt
+          rm -f semgrep-temp.json
           if [ ! -f "semgrep-results.sarif" ]; then
             echo '{"runs": []}' > semgrep-results.sarif
           fi
@@ -78,6 +83,9 @@ jobs:
           if [ ! -f "semgrep-results.sarif" ]; then
             echo '{"runs": []}' > semgrep-results.sarif
           fi
+          if [ ! -f "semgrep-results.txt" ]; then
+            echo "No Semgrep findings" > semgrep-results.txt
+          fi
       
       - name: Upload Security Reports
         if: always()
@@ -88,6 +96,7 @@ jobs:
             CustomerPortal/Backend/npm-audit-customer.json
             EmployeePortal/Backend/npm-audit-employee.json
             semgrep-results.sarif
+            semgrep-results.txt
           retention-days: 7
       
       - name: Generate Quick Summary
@@ -98,6 +107,7 @@ jobs:
           
           if [ -f "semgrep-results.sarif" ]; then
             echo "✅ Semgrep SAST scan completed" >> $GITHUB_STEP_SUMMARY
+            echo "Human-readable findings saved to semgrep-results.txt" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Semgrep SAST scan failed" >> $GITHUB_STEP_SUMMARY
           fi
