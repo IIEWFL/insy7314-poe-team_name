@@ -239,13 +239,11 @@ jobs:
           name: Create Test Environment File
           command: |
             cd CustomerPortal/Backend
-            # Try different MongoDB connection strings
-            cat > .env << 'EOF'
-MONGODB_URI=mongodb://mongo:27017/test_customer_portal
-PORT=8000
-JWT_SECRET=test_secret_key_for_ci
-USE_HTTPS=false
-EOF
+            # Create .env file using echo commands
+            echo "MONGODB_URI=mongodb://mongo:27017/test_customer_portal" > .env
+            echo "PORT=8000" >> .env
+            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
+            echo "USE_HTTPS=false" >> .env
       - run:
           name: Test MongoDB Connection
           command: |
@@ -435,13 +433,11 @@ EOF
           name: Create Test Environment File
           command: |
             cd EmployeePortal/Backend
-            # Try different MongoDB connection strings
-            cat > .env << 'EOF'
-MONGODB_URI=mongodb://mongo:27017/test_employee_portal
-PORT=8001
-JWT_SECRET=test_secret_key_for_ci
-USE_HTTPS=false
-EOF
+            # Create .env file using echo commands
+            echo "MONGODB_URI=mongodb://mongo:27017/test_employee_portal" > .env
+            echo "PORT=8001" >> .env
+            echo "JWT_SECRET=test_secret_key_for_ci" >> .env
+            echo "USE_HTTPS=false" >> .env
       - run:
           name: Test MongoDB Connection
           command: |
