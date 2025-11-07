@@ -144,24 +144,22 @@ commands:
           command: |
             cd << parameters.project-path >>
             
-            # Install scanner
             wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
             unzip -q sonar-scanner-cli-5.0.1.3006-linux.zip
             
-            # Run analysis
             if [ -n "$SONAR_TOKEN" ] && [ "$SONAR_TOKEN" != "admin" ]; then
               ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
-                -Dsonar.projectKey=<< parameters.project-key >> \
-                -Dsonar.projectName=<< parameters.project-name >> \
+                -Dsonar.projectKey="<< parameters.project-key >>" \
+                -Dsonar.projectName="<< parameters.project-name >>" \
                 -Dsonar.projectVersion=1.0 \
                 -Dsonar.host.url=http://localhost:9000 \
-                -Dsonar.token=$SONAR_TOKEN \
+                -Dsonar.token="$SONAR_TOKEN" \
                 -Dsonar.sources=src,controllers,models,routes,middleware \
                 -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.d.ts
             else
               ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
-                -Dsonar.projectKey=<< parameters.project-key >> \
-                -Dsonar.projectName=<< parameters.project-name >> \
+                -Dsonar.projectKey="<< parameters.project-key >>" \
+                -Dsonar.projectName="<< parameters.project-name >>" \
                 -Dsonar.projectVersion=1.0 \
                 -Dsonar.host.url=http://localhost:9000 \
                 -Dsonar.login=admin \
