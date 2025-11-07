@@ -296,99 +296,106 @@ jobs:
           name: Create API Test Collection
           command: |
             cd CustomerPortal/Backend
-            cat > api-tests.json << 'EOF'
-            {
-              "info": {
-                "name": "Customer Portal API Tests",
-                "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-              },
-              "item": [
-                {
-                  "name": "Health Check",
-                  "request": {
-                    "method": "GET",
-                    "header": [],
-                    "url": {
-                      "raw": "http://localhost:8000/api",
-                      "protocol": "http",
-                      "host": ["localhost"],
-                      "port": "8000",
-                      "path": ["api"]
-                    }
-                  }
-                },
-                {
-                  "name": "Customer Signup",
-                  "event": [
-                    {
-                      "listen": "test",
-                      "script": {
-                        "exec": [
-                          "pm.test('Status code is 201', function () {",
-                          "    pm.response.to.have.status(201);",
-                          "});",
-                          "pm.test('Response has token', function () {",
-                          "    var jsonData = pm.response.json();",
-                          "    pm.expect(jsonData).to.have.property('token');",
-                          "});"
-                        ]
-                      }
-                    }
-                  ],
-                  "request": {
-                    "method": "POST",
-                    "header": [{"key": "Content-Type", "value": "application/json"}],
-                    "body": {
-                      "mode": "raw",
-                      "raw": "{\"fullName\":\"Test User\",\"idNumber\":\"123456789\",\"accountNumber\":\"123456789012\",\"password\":\"TestPass123!\",\"email\":\"test@example.com\"}"
-                    },
-                    "url": {
-                      "raw": "http://localhost:8000/api/auth/signup",
-                      "protocol": "http",
-                      "host": ["localhost"],
-                      "port": "8000",
-                      "path": ["api", "auth", "signup"]
-                    }
-                  }
-                },
-                {
-                  "name": "Customer Login",
-                  "event": [
-                    {
-                      "listen": "test",
-                      "script": {
-                        "exec": [
-                          "pm.test('Status code is 200', function () {",
-                          "    pm.response.to.have.status(200);",
-                          "});",
-                          "pm.test('Response has token', function () {",
-                          "    var jsonData = pm.response.json();",
-                          "    pm.expect(jsonData).to.have.property('token');",
-                          "    pm.environment.set('customer_token', jsonData.token);",
-                          "});"
-                        ]
-                      }
-                    }
-                  ],
-                  "request": {
-                    "method": "POST",
-                    "header": [{"key": "Content-Type", "value": "application/json"}],
-                    "body": {
-                      "mode": "raw",
-                      "raw": "{\"fullName\":\"Test User\",\"accountNumber\":\"123456789012\",\"password\":\"TestPass123!\"}"
-                    },
-                    "url": {
-                      "raw": "http://localhost:8000/api/auth/login",
-                      "protocol": "http",
-                      "host": ["localhost"],
-                      "port": "8000",
-                      "path": ["api", "auth", "login"]
-                    }
-                  }
+            # Create the API test collection using a Python script to avoid character limits
+            cat > create-api-tests.py << 'EOF'
+import json
+
+test_collection = {
+    "info": {
+        "name": "Customer Portal API Tests",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "http://localhost:8000/api",
+                    "protocol": "http",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["api"]
                 }
-              ]
             }
-            EOF
+        },
+        {
+            "name": "Customer Signup",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status code is 201', function () {",
+                            "    pm.response.to.have.status(201);",
+                            "});",
+                            "pm.test('Response has token', function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData).to.have.property('token');",
+                            "});"
+                        ]
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\"fullName\":\"Test User\",\"idNumber\":\"123456789\",\"accountNumber\":\"123456789012\",\"password\":\"TestPass123!\",\"email\":\"test@example.com\"}"
+                },
+                "url": {
+                    "raw": "http://localhost:8000/api/auth/signup",
+                    "protocol": "http",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["api", "auth", "signup"]
+                }
+            }
+        },
+        {
+            "name": "Customer Login",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status code is 200', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "pm.test('Response has token', function () {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.expect(jsonData).to.have.property('token');",
+                            "    pm.environment.set('customer_token', jsonData.token);",
+                            "});"
+                        ]
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\"fullName\":\"Test User\",\"accountNumber\":\"123456789012\",\"password\":\"TestPass123!\"}"
+                },
+                "url": {
+                    "raw": "http://localhost:8000/api/auth/login",
+                    "protocol": "http",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["api", "auth", "login"]
+                }
+            }
+        }
+    ]
+}
+
+with open('api-tests.json', 'w') as f:
+    json.dump(test_collection, f, indent=2)
+EOF
+            python3 create-api-tests.py
       - run:
           name: Run API Tests with Newman
           command: |
@@ -587,67 +594,74 @@ jobs:
           name: Create API Test Collection
           command: |
             cd EmployeePortal/Backend
-            cat > api-tests.json << 'EOF'
-            {
-              "info": {
-                "name": "Employee Portal API Tests",
-                "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-              },
-              "item": [
-                {
-                  "name": "Health Check",
-                  "request": {
-                    "method": "GET",
-                    "header": [],
-                    "url": {
-                      "raw": "http://localhost:8001/api/employee",
-                      "protocol": "http",
-                      "host": ["localhost"],
-                      "port": "8001",
-                      "path": ["api", "employee"]
-                    }
-                  }
-                },
-                {
-                  "name": "Employee Login",
-                  "event": [
-                    {
-                      "listen": "test",
-                      "script": {
-                        "exec": [
-                          "pm.test('Status code is 200 or 400', function () {",
-                          "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
-                          "});",
-                          "if (pm.response.code === 200) {",
-                          "    pm.test('Response has token', function () {",
-                          "        var jsonData = pm.response.json();",
-                          "        pm.expect(jsonData).to.have.property('token');",
-                          "        pm.environment.set('employee_token', jsonData.token);",
-                          "    });",
-                          "}"
-                        ]
-                      }
-                    }
-                  ],
-                  "request": {
-                    "method": "POST",
-                    "header": [{"key": "Content-Type", "value": "application/json"}],
-                    "body": {
-                      "mode": "raw",
-                      "raw": "{\"employeeId\":\"EMP000001\",\"password\":\"TestPass123!\"}"
-                    },
-                    "url": {
-                      "raw": "http://localhost:8001/api/employee/auth/login",
-                      "protocol": "http",
-                      "host": ["localhost"],
-                      "port": "8001",
-                      "path": ["api", "employee", "auth", "login"]
-                    }
-                  }
+            # Create the API test collection using a Python script to avoid character limits
+            cat > create-api-tests.py << 'EOF'
+import json
+
+test_collection = {
+    "info": {
+        "name": "Employee Portal API Tests",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "http://localhost:8001/api/employee",
+                    "protocol": "http",
+                    "host": ["localhost"],
+                    "port": "8001",
+                    "path": ["api", "employee"]
                 }
-              ]
             }
-            EOF
+        },
+        {
+            "name": "Employee Login",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status code is 200 or 400', function () {",
+                            "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                            "});",
+                            "if (pm.response.code === 200) {",
+                            "    pm.test('Response has token', function () {",
+                            "        var jsonData = pm.response.json();",
+                            "        pm.expect(jsonData).to.have.property('token');",
+                            "        pm.environment.set('employee_token', jsonData.token);",
+                            "    });",
+                            "}"
+                        ]
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\"employeeId\":\"EMP000001\",\"password\":\"TestPass123!\"}"
+                },
+                "url": {
+                    "raw": "http://localhost:8001/api/employee/auth/login",
+                    "protocol": "http",
+                    "host": ["localhost"],
+                    "port": "8001",
+                    "path": ["api", "employee", "auth", "login"]
+                }
+            }
+        }
+    ]
+}
+
+with open('api-tests.json', 'w') as f:
+    json.dump(test_collection, f, indent=2)
+EOF
+            python3 create-api-tests.py
       - run:
           name: Run API Tests with Newman
           command: |
