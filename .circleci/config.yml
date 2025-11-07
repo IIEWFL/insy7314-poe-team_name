@@ -9,11 +9,11 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install dependencies including express-validator
+          name: Install ALL missing dependencies
           command: |
             cd EmployeePortal/Backend
-            # Install missing dependency
-            npm install express-validator
+            # Install all the missing dependencies your code actually uses
+            npm install express-validator express-brute
             npm install
       - run:
           name: Wait for MongoDB
@@ -25,7 +25,6 @@ jobs:
               fi
               sleep 2
             done
-            echo "MongoDB failed to start"
             exit 1
       - run:
           name: Create test environment
@@ -46,7 +45,7 @@ jobs:
             echo "Server started with PID: $SERVER_PID"
             
             # Wait for server to start
-            sleep 8
+            sleep 10
             
             # Check if server is running
             if ps -p $SERVER_PID > /dev/null; then
@@ -56,18 +55,14 @@ jobs:
               echo "=== Testing endpoints ==="
               if curl -s http://localhost:8001/api/employee > /dev/null; then
                 echo "✓ API endpoint responding"
+                exit 0
               else
                 echo "✗ API endpoint not responding"
+                exit 1
               fi
-              
-              # Kill the server
-              kill $SERVER_PID
-              echo "Server stopped"
             else
               echo "✗ Server process died"
-              # Start in foreground to see the actual error
-              echo "=== Server output ==="
-              node server.js
+              exit 1
             fi
 
   customer-backend-api-tests:
@@ -78,11 +73,11 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install dependencies
+          name: Install ALL missing dependencies
           command: |
             cd CustomerPortal/Backend
-            # Check if customer backend also needs express-validator
-            npm install express-validator
+            # Install all the missing dependencies your code actually uses
+            npm install express-validator express-brute
             npm install
       - run:
           name: Wait for MongoDB
@@ -94,7 +89,6 @@ jobs:
               fi
               sleep 2
             done
-            echo "MongoDB failed to start"
             exit 1
       - run:
           name: Create test environment
@@ -115,7 +109,7 @@ jobs:
             echo "Server started with PID: $SERVER_PID"
             
             # Wait for server to start
-            sleep 8
+            sleep 10
             
             # Check if server is running
             if ps -p $SERVER_PID > /dev/null; then
@@ -125,18 +119,14 @@ jobs:
               echo "=== Testing endpoints ==="
               if curl -s http://localhost:8000/api/customer > /dev/null; then
                 echo "✓ API endpoint responding"
+                exit 0
               else
                 echo "✗ API endpoint not responding"
+                exit 1
               fi
-              
-              # Kill the server
-              kill $SERVER_PID
-              echo "Server stopped"
             else
               echo "✗ Server process died"
-              # Start in foreground to see the actual error
-              echo "=== Server output ==="
-              node server.js
+              exit 1
             fi
 
 workflows:
