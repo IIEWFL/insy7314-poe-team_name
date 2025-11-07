@@ -58,15 +58,33 @@ jobs:
             if ps -p $SERVER_PID > /dev/null; then
               echo "✓ Server process is running"
               
-              # Test the endpoints
+              # Test the endpoints with actual response validation
               echo "=== Testing endpoints ==="
-              if curl -s http://localhost:8001/api/employee > /dev/null; then
-                echo "✓ API endpoint responding"
-                exit 0
+              
+              # Test employee API endpoint and check response code
+              response_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee)
+              echo "Employee API returned HTTP $response_code"
+              
+              # Accept 200 (success), 401 (unauthorized), 404 (not found) as valid responses
+              # Reject 500 (server error) and 000 (connection refused)
+              if [[ "$response_code" =~ ^(200|401|404)$ ]]; then
+                echo "✓ Employee API endpoint responding correctly (HTTP $response_code)"
               else
-                echo "✗ API endpoint not responding"
+                echo "✗ Employee API endpoint failed (HTTP $response_code)"
                 exit 1
               fi
+              
+              # Test root endpoint too
+              root_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/)
+              echo "Root endpoint returned HTTP $root_code"
+              
+              if [[ "$root_code" =~ ^(200|404)$ ]]; then
+                echo "✓ Root endpoint responding (HTTP $root_code)"
+              else
+                echo "⚠ Root endpoint not standard (HTTP $root_code)"
+              fi
+              
+              exit 0
             else
               echo "✗ Server process died"
               exit 1
@@ -129,15 +147,33 @@ jobs:
             if ps -p $SERVER_PID > /dev/null; then
               echo "✓ Server process is running"
               
-              # Test the endpoints
+              # Test the endpoints with actual response validation
               echo "=== Testing endpoints ==="
-              if curl -s http://localhost:8000/api/customer > /dev/null; then
-                echo "✓ API endpoint responding"
-                exit 0
+              
+              # Test customer API endpoint and check response code
+              response_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customer)
+              echo "Customer API returned HTTP $response_code"
+              
+              # Accept 200 (success), 401 (unauthorized), 404 (not found) as valid responses
+              # Reject 500 (server error) and 000 (connection refused)
+              if [[ "$response_code" =~ ^(200|401|404)$ ]]; then
+                echo "✓ Customer API endpoint responding correctly (HTTP $response_code)"
               else
-                echo "✗ API endpoint not responding"
+                echo "✗ Customer API endpoint failed (HTTP $response_code)"
                 exit 1
               fi
+              
+              # Test root endpoint too
+              root_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/)
+              echo "Root endpoint returned HTTP $root_code"
+              
+              if [[ "$root_code" =~ ^(200|404)$ ]]; then
+                echo "✓ Root endpoint responding (HTTP $root_code)"
+              else
+                echo "⚠ Root endpoint not standard (HTTP $root_code)"
+              fi
+              
+              exit 0
             else
               echo "✗ Server process died"
               exit 1
