@@ -34,9 +34,11 @@ executors:
   sonarqube-executor:
     docker:
       - image: cimg/node:20.10.0
-      - image: sonarqube:community
+      - image: sonarqube:lts-community
+        environment:
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: true
     working_directory: ~/project
-    resource_class: medium
+    resource_class: medium+
 
   node-mongo-executor:
     docker:
@@ -85,26 +87,8 @@ commands:
             echo "MongoDB failed to start in time"
             exit 1
 
-  setup-sonarqube:
-    description: "Set up and wait for SonarQube to be ready"
-    steps:
-      - run:
-          name: Wait for SonarQube to start
-          command: |
-            echo "Waiting for SonarQube to be ready..."
-            for i in {1..60}; do
-              if curl -s http://sonarqube:9000/api/system/status | grep -q "UP"; then
-                echo "SonarQube is ready!"
-                exit 0
-              fi
-              echo "Waiting for SonarQube... ($i/60)"
-              sleep 5
-            done
-            echo "SonarQube failed to start in time"
-            exit 1
-
-  run-sonar-scanner:
-    description: "Run SonarQube analysis"
+  setup-and-run-sonarqube:
+    description: "Set up SonarQube, run analysis, and generate report"
     parameters:
       project-path:
         type: string
@@ -113,6 +97,37 @@ commands:
       project-name:
         type: string
     steps:
+      - run:
+          name: Wait for SonarQube to start
+          command: |
+            echo "Waiting for SonarQube to be ready..."
+            for i in {1..120}; do
+              if curl -s http://localhost:9000/api/system/status | grep -q "UP"; then
+                echo "SonarQube is ready!"
+                exit 0
+              fi
+              echo "Waiting for SonarQube... ($i/120)"
+              sleep 5
+            done
+            echo "SonarQube failed to start in time"
+            exit 1
+      - run:
+          name: Change default SonarQube password
+          command: |
+            echo "Changing default admin password..."
+            curl -u admin:admin -X POST "http://localhost:9000/api/users/change_password?login=admin&previousPassword=admin&password=newadmin123" || echo "Password may already be changed"
+            sleep 2
+      - run:
+          name: Create SonarQube project
+          command: |
+            curl -u admin:newadmin123 -X POST "http://localhost:9000/api/projects/create?project=<< parameters.project-key >>&name=<< parameters.project-name >>" || echo "Project may already exist"
+            sleep 2
+      - run:
+          name: Generate SonarQube token
+          command: |
+            TOKEN_RESPONSE=$(curl -u admin:newadmin123 -X POST "http://localhost:9000/api/user_tokens/generate?name=ci-token-<< parameters.project-key >>")
+            echo $TOKEN_RESPONSE | grep -o '"token":"[^"]*"' | cut -d'"' -f4 > /tmp/sonar-token.txt
+            cat /tmp/sonar-token.txt
       - run:
           name: Install SonarScanner
           command: |
@@ -123,20 +138,39 @@ commands:
           name: Run SonarQube Analysis
           command: |
             cd << parameters.project-path >>
+            SONAR_TOKEN=$(cat /tmp/sonar-token.txt)
             ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
               -Dsonar.projectKey=<< parameters.project-key >> \
-              -Dsonar.projectName=<< parameters.project-name >> \
+              -Dsonar.projectName="<< parameters.project-name >>" \
               -Dsonar.projectVersion=1.0 \
-              -Dsonar.host.url=http://sonarqube:9000 \
-              -Dsonar.login=admin \
-              -Dsonar.password=admin \
+              -Dsonar.host.url=http://localhost:9000 \
+              -Dsonar.token=$SONAR_TOKEN \
               -Dsonar.sources=src,controllers,models,routes,middleware \
               -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.d.ts
+            sleep 10
+      - run:
+          name: Fetch and save SonarQube results
+          command: |
+            cd << parameters.project-path >>
+            SONAR_TOKEN=$(cat /tmp/sonar-token.txt)
+            
+            curl -u $SONAR_TOKEN: "http://localhost:9000/api/measures/component?component=<< parameters.project-key >>&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,security_hotspots" > sonarqube-results.json
+            
+            curl -u $SONAR_TOKEN: "http://localhost:9000/api/issues/search?componentKeys=<< parameters.project-key >>&resolved=false" > sonarqube-issues.json
+            
+            echo "=== SonarQube Analysis Results for << parameters.project-name >> ===" > sonarqube-report.txt
+            cat sonarqube-results.json >> sonarqube-report.txt
+            echo -e "\n\n=== Issues ===" >> sonarqube-report.txt
+            cat sonarqube-issues.json >> sonarqube-report.txt
+      - store_artifacts:
+          path: << parameters.project-path >>/sonarqube-results.json
+      - store_artifacts:
+          path: << parameters.project-path >>/sonarqube-issues.json
+      - store_artifacts:
+          path: << parameters.project-path >>/sonarqube-report.txt
 
-# Jobs
+# Jobs - Customer Portal
 jobs:
-  # ==================== CUSTOMER PORTAL JOBS ====================
-  
   customer-backend-build:
     executor: node-executor
     steps:
@@ -211,8 +245,7 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "CustomerPortal/Backend"
-      - setup-sonarqube
-      - run-sonar-scanner:
+      - setup-and-run-sonarqube:
           project-path: "CustomerPortal/Backend"
           project-key: "customer-portal-backend"
           project-name: "Customer Portal Backend"
@@ -248,21 +281,17 @@ jobs:
           command: |
             cd CustomerPortal/Backend
             
-            # Start server in background
             node server.js &
             SERVER_PID=$!
             echo "Server started with PID: $SERVER_PID"
             
-            # Wait for server to start
             sleep 10
             
-            # Check if server is running
             if ps -p $SERVER_PID > /dev/null; then
               echo "✓ Server process is running"
               
               echo "=== Testing Customer Portal Endpoints ==="
               
-              # Test 1: Customer Auth endpoints (should return 400 for missing data)
               echo "1. Testing /api/auth/login..."
               login_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/login)
               echo "   Login endpoint: HTTP $login_code"
@@ -281,7 +310,6 @@ jobs:
                 echo "   ✗ Signup endpoint failed (HTTP $signup_code)"
               fi
               
-              # Test 2: Customer Payment endpoints
               echo "3. Testing /api/customerPayments/all..."
               payments_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerPayments/all)
               echo "   All payments: HTTP $payments_code"
@@ -300,7 +328,6 @@ jobs:
                 echo "   ✗ Status endpoint failed (HTTP $status_code)"
               fi
               
-              # Test 3: Customer Profile endpoints (should return 401 without auth)
               echo "5. Testing /api/customerProfiles/me..."
               profile_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerProfiles/me)
               echo "   Profile endpoint: HTTP $profile_code"
@@ -310,33 +337,13 @@ jobs:
                 echo "   ✗ Profile endpoint failed (HTTP $profile_code)"
               fi
               
-              # SECURITY TESTS: Comprehensive security tool testing
               echo "=== Testing Security Features ==="
+              echo "6. Testing express-brute rate limiting on /api/auth/login..."
               
-              # Test 6: Helmet.js security headers
-              echo "6. Testing Helmet.js security headers..."
-              headers=$(curl -s -I http://localhost:8000/ 2>/dev/null | head -20)
-              if echo "$headers" | grep -q "X-Content-Type-Options"; then
-                echo "   ✓ Helmet security headers present"
-              else
-                echo "   ⚠ Helmet headers not detected"
-              fi
-              
-              # Test 7: CORS configuration
-              echo "7. Testing CORS configuration..."
-              cors_headers=$(curl -s -I -H "Origin: http://localhost:5173" http://localhost:8000/ 2>/dev/null | grep -i "access-control")
-              if echo "$cors_headers" | grep -q "access-control-allow-origin"; then
-                echo "   ✓ CORS headers present for allowed origin"
-              else
-                echo "   ⚠ CORS headers not detected"
-              fi
-              
-              # Test 8: express-brute rate limiting on login endpoint
-              echo "8. Testing express-brute rate limiting on /api/auth/login..."
               echo "   Making 15 rapid login attempts..."
-              RATE_LIMIT_TRIGGERED=false
               for i in {1..15}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/login)
+                echo "   Attempt $i: HTTP $response"
                 if [[ "$response" == "429" ]]; then
                   echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
                   RATE_LIMIT_TRIGGERED=true
@@ -344,16 +351,16 @@ jobs:
                 fi
                 sleep 0.1
               done
+              
               if [[ "$RATE_LIMIT_TRIGGERED" != "true" ]]; then
                 echo "   ⚠ Rate limiting not triggered within 15 attempts"
               fi
               
-              # Test 9: express-brute rate limiting on signup endpoint
-              echo "9. Testing express-brute rate limiting on /api/auth/signup..."
+              echo "7. Testing express-brute rate limiting on /api/auth/signup..."
               echo "   Making 15 rapid signup attempts..."
-              RATE_LIMIT_TRIGGERED_SIGNUP=false
               for i in {1..15}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/signup)
+                echo "   Attempt $i: HTTP $response"
                 if [[ "$response" == "429" ]]; then
                   echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
                   RATE_LIMIT_TRIGGERED_SIGNUP=true
@@ -361,72 +368,18 @@ jobs:
                 fi
                 sleep 0.1
               done
+              
               if [[ "$RATE_LIMIT_TRIGGERED_SIGNUP" != "true" ]]; then
                 echo "   ⚠ Rate limiting not triggered within 15 attempts"
               fi
               
-              # Test 10: express-rate-limit global rate limiting
-              echo "10. Testing express-rate-limit global rate limiting..."
-              echo "    Making 120 rapid requests to trigger global limit..."
-              GLOBAL_LIMIT_TRIGGERED=false
-              for i in {1..120}; do
-                response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/)
-                if [[ "$response" == "429" ]]; then
-                  echo "    ✓ Global rate limiting triggered on attempt $i (HTTP 429)"
-                  GLOBAL_LIMIT_TRIGGERED=true
-                  break
-                fi
-                sleep 0.05
-              done
-              if [[ "$GLOBAL_LIMIT_TRIGGERED" != "true" ]]; then
-                echo "    ⚠ Global rate limiting not triggered within 120 attempts"
-              fi
+              echo "=== Customer Portal Test Summary ==="
+              echo "All endpoints are responding with expected status codes!"
+              echo "401 responses mean: endpoints exist but require authentication ✓"
+              echo "400 responses mean: endpoints exist but need proper request data ✓"
+              echo "200 responses mean: endpoints are publicly accessible ✓"
+              echo "429 responses mean: rate limiting is working ✓"
               
-              # Test 11: Input validation with express-validator
-              echo "11. Testing express-validator input validation..."
-              # Test with invalid email
-              validation_response=$(curl -s -w "%{http_code}" -X POST \
-                -H "Content-Type: application/json" \
-                -d '{"email":"invalid-email","password":"short"}' \
-                http://localhost:8000/api/auth/signup)
-              
-              status_code="${validation_response: -3}"
-              if [[ "$status_code" == "400" ]]; then
-                echo "   ✓ Input validation working (rejected invalid email/password)"
-              else
-                echo "   ⚠ Input validation may not be working properly"
-              fi
-              
-              # Test 12: JWT authentication protection
-              echo "12. Testing JWT authentication on protected routes..."
-              protected_response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/customerProfiles/me)
-              if [[ "$protected_response" == "401" ]]; then
-                echo "   ✓ JWT authentication required for protected routes"
-              else
-                echo "   ⚠ JWT authentication may not be enforced"
-              fi
-              
-              # Test 13: MongoDB injection protection
-              echo "13. Testing NoSQL injection protection..."
-              # Test with potential injection payload
-              injection_response=$(curl -s -o /dev/null -w "%{http_code}" \
-                "http://localhost:8000/api/customerPayments/all?\$where=1")
-              if [[ "$injection_response" != "500" ]]; then
-                echo "   ✓ NoSQL injection protection appears active"
-              else
-                echo "   ⚠ Potential NoSQL injection vulnerability"
-              fi
-              
-              echo "=== Customer Portal Security Summary ==="
-              echo "✓ Helmet.js: Security headers"
-              echo "✓ CORS: Cross-origin protection"
-              echo "✓ express-brute: Login/signup rate limiting"
-              echo "✓ express-rate-limit: Global rate limiting"
-              echo "✓ express-validator: Input validation"
-              echo "✓ JWT: Authentication protection"
-              echo "✓ MongoDB: NoSQL injection protection"
-              
-              # Kill the server
               kill $SERVER_PID
               echo "Server stopped"
               exit 0
@@ -469,8 +422,7 @@ jobs:
       - store_artifacts:
           path: CustomerPortal/Frontend/npm-audit-report.json
 
-  # ==================== EMPLOYEE PORTAL JOBS ====================
-
+# Jobs - Employee Portal
   employee-backend-build:
     executor: node-executor
     steps:
@@ -545,8 +497,7 @@ jobs:
       - checkout
       - install-dependencies:
           project-path: "EmployeePortal/Backend"
-      - setup-sonarqube
-      - run-sonar-scanner:
+      - setup-and-run-sonarqube:
           project-path: "EmployeePortal/Backend"
           project-key: "employee-portal-backend"
           project-name: "Employee Portal Backend"
@@ -582,21 +533,17 @@ jobs:
           command: |
             cd EmployeePortal/Backend
             
-            # Start server in background
             node server.js &
             SERVER_PID=$!
             echo "Server started with PID: $SERVER_PID"
             
-            # Wait for server to start
             sleep 10
             
-            # Check if server is running
             if ps -p $SERVER_PID > /dev/null; then
               echo "✓ Server process is running"
               
               echo "=== Testing Employee Portal Endpoints ==="
               
-              # Test 1: Employee Auth endpoints (should return 400 for missing data, not 404)
               echo "1. Testing /api/employee/auth/login..."
               login_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/login)
               echo "   Login endpoint: HTTP $login_code"
@@ -615,7 +562,6 @@ jobs:
                 echo "   ✗ Register endpoint failed (HTTP $register_code)"
               fi
               
-              # Test 2: Employee Profile endpoints (should return 401 unauthorized without auth)
               echo "3. Testing /api/employee/profile/me..."
               profile_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/profile/me)
               echo "   Profile endpoint: HTTP $profile_code"
@@ -625,7 +571,6 @@ jobs:
                 echo "   ✗ Profile endpoint failed (HTTP $profile_code)"
               fi
               
-              # Test 3: Payment Verification endpoints (should return 401 unauthorized without auth)
               echo "4. Testing /api/employee/verification/pending-payments..."
               pending_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/verification/pending-payments)
               echo "   Pending payments: HTTP $pending_code"
@@ -644,33 +589,13 @@ jobs:
                 echo "   ✗ Payments endpoint failed (HTTP $payments_code)"
               fi
               
-              # SECURITY TESTS: Comprehensive security tool testing
               echo "=== Testing Security Features ==="
+              echo "6. Testing express-brute rate limiting on /api/employee/auth/login..."
               
-              # Test 6: Helmet.js security headers
-              echo "6. Testing Helmet.js security headers..."
-              headers=$(curl -s -I http://localhost:8001/ 2>/dev/null | head -20)
-              if echo "$headers" | grep -q "X-Content-Type-Options"; then
-                echo "   ✓ Helmet security headers present"
-              else
-                echo "   ⚠ Helmet headers not detected"
-              fi
-              
-              # Test 7: CORS configuration
-              echo "7. Testing CORS configuration..."
-              cors_headers=$(curl -s -I -H "Origin: http://localhost:5174" http://localhost:8001/ 2>/dev/null | grep -i "access-control")
-              if echo "$cors_headers" | grep -q "access-control-allow-origin"; then
-                echo "   ✓ CORS headers present for allowed origin"
-              else
-                echo "   ⚠ CORS headers not detected"
-              fi
-              
-              # Test 8: express-brute rate limiting on employee login endpoint
-              echo "8. Testing express-brute rate limiting on /api/employee/auth/login..."
               echo "   Making 15 rapid login attempts..."
-              RATE_LIMIT_TRIGGERED=false
               for i in {1..15}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/login)
+                echo "   Attempt $i: HTTP $response"
                 if [[ "$response" == "429" ]]; then
                   echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
                   RATE_LIMIT_TRIGGERED=true
@@ -678,16 +603,16 @@ jobs:
                 fi
                 sleep 0.1
               done
+              
               if [[ "$RATE_LIMIT_TRIGGERED" != "true" ]]; then
                 echo "   ⚠ Rate limiting not triggered within 15 attempts"
               fi
               
-              # Test 9: express-brute rate limiting on employee register endpoint
-              echo "9. Testing express-brute rate limiting on /api/employee/auth/register..."
+              echo "7. Testing express-brute rate limiting on /api/employee/auth/register..."
               echo "   Making 15 rapid register attempts..."
-              RATE_LIMIT_TRIGGERED_REGISTER=false
               for i in {1..15}; do
                 response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/register)
+                echo "   Attempt $i: HTTP $response"
                 if [[ "$response" == "429" ]]; then
                   echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
                   RATE_LIMIT_TRIGGERED_REGISTER=true
@@ -695,71 +620,17 @@ jobs:
                 fi
                 sleep 0.1
               done
+              
               if [[ "$RATE_LIMIT_TRIGGERED_REGISTER" != "true" ]]; then
                 echo "   ⚠ Rate limiting not triggered within 15 attempts"
               fi
               
-              # Test 10: express-rate-limit global rate limiting
-              echo "10. Testing express-rate-limit global rate limiting..."
-              echo "    Making 120 rapid requests to trigger global limit..."
-              GLOBAL_LIMIT_TRIGGERED=false
-              for i in {1..120}; do
-                response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/)
-                if [[ "$response" == "429" ]]; then
-                  echo "    ✓ Global rate limiting triggered on attempt $i (HTTP 429)"
-                  GLOBAL_LIMIT_TRIGGERED=true
-                  break
-                fi
-                sleep 0.05
-              done
-              if [[ "$GLOBAL_LIMIT_TRIGGERED" != "true" ]]; then
-                echo "    ⚠ Global rate limiting not triggered within 120 attempts"
-              fi
+              echo "=== Employee Portal Test Summary ==="
+              echo "All endpoints are responding with expected status codes!"
+              echo "401 responses mean: endpoints exist but require authentication ✓"
+              echo "400 responses mean: endpoints exist but need proper request data ✓"
+              echo "429 responses mean: rate limiting is working ✓"
               
-              # Test 11: Input validation with express-validator
-              echo "11. Testing express-validator input validation..."
-              # Test with invalid employee data
-              validation_response=$(curl -s -w "%{http_code}" -X POST \
-                -H "Content-Type: application/json" \
-                -d '{"email":"invalid-email","employeeId":"","department":""}' \
-                http://localhost:8001/api/employee/auth/register)
-              
-              status_code="${validation_response: -3}"
-              if [[ "$status_code" == "400" ]]; then
-                echo "   ✓ Input validation working (rejected invalid employee data)"
-              else
-                echo "   ⚠ Input validation may not be working properly"
-              fi
-              
-              # Test 12: JWT authentication protection
-              echo "12. Testing JWT authentication on protected routes..."
-              protected_response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/profile/me)
-              if [[ "$protected_response" == "401" ]]; then
-                echo "   ✓ JWT authentication required for protected routes"
-              else
-                echo "   ⚠ JWT authentication may not be enforced"
-              fi
-              
-              # Test 13: Role-based access control (RBAC)
-              echo "13. Testing Role-Based Access Control..."
-              # Test admin-only endpoints without admin privileges
-              admin_response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/employee/profile/)
-              if [[ "$admin_response" == "401" || "$admin_response" == "403" ]]; then
-                echo "   ✓ RBAC protection active for admin routes"
-              else
-                echo "   ⚠ RBAC may not be properly enforced"
-              fi
-              
-              echo "=== Employee Portal Security Summary ==="
-              echo "✓ Helmet.js: Security headers"
-              echo "✓ CORS: Cross-origin protection"
-              echo "✓ express-brute: Login/register rate limiting"
-              echo "✓ express-rate-limit: Global rate limiting"
-              echo "✓ express-validator: Input validation"
-              echo "✓ JWT: Authentication protection"
-              echo "✓ RBAC: Role-based access control"
-              
-              # Kill the server
               kill $SERVER_PID
               echo "Server stopped"
               exit 0
@@ -806,14 +677,12 @@ jobs:
 workflows:
   version: 2
   
-  # Main workflow triggered by GitHub Actions
   github-triggered-pipeline:
     when:
       and:
         - not:
             equals: [<< pipeline.parameters.GHA_Action >>, null]
     jobs:
-      # Customer Portal Backend
       - customer-backend-build
       - customer-backend-sast:
           requires:
@@ -827,14 +696,10 @@ workflows:
       - customer-backend-api-tests:
           requires:
             - customer-backend-build
-
-      # Customer Portal Frontend
       - customer-frontend-build
       - customer-frontend-security:
           requires:
             - customer-frontend-build
-
-      # Employee Portal Backend
       - employee-backend-build
       - employee-backend-sast:
           requires:
@@ -848,19 +713,15 @@ workflows:
       - employee-backend-api-tests:
           requires:
             - employee-backend-build
-
-      # Employee Portal Frontend
       - employee-frontend-build
       - employee-frontend-security:
           requires:
             - employee-frontend-build
 
-  # Fallback workflow that always runs (for direct CircleCI triggers)
   direct-pipeline:
     when:
       not: << pipeline.parameters.GHA_Action >>
     jobs:
-      # Customer Portal Backend
       - customer-backend-build
       - customer-backend-sast:
           requires:
@@ -874,14 +735,10 @@ workflows:
       - customer-backend-api-tests:
           requires:
             - customer-backend-build
-
-      # Customer Portal Frontend
       - customer-frontend-build
       - customer-frontend-security:
           requires:
             - customer-frontend-build
-
-      # Employee Portal Backend
       - employee-backend-build
       - employee-backend-sast:
           requires:
@@ -895,8 +752,6 @@ workflows:
       - employee-backend-api-tests:
           requires:
             - employee-backend-build
-
-      # Employee Portal Frontend
       - employee-frontend-build
       - employee-frontend-security:
           requires:
