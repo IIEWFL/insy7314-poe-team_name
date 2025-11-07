@@ -13,10 +13,10 @@ jobs:
             - v1-deps-EmployeePortal/Backend-{{ checksum "EmployeePortal/Backend/package-lock.json" }}
             - v1-deps-EmployeePortal/Backend-
       - run:
-          name: Install dependencies from package.json
+          name: Install dependencies with legacy peer deps
           command: |
             cd EmployeePortal/Backend
-            npm install
+            npm install --legacy-peer-deps
       - save_cache:
           key: v1-deps-EmployeePortal/Backend-{{ checksum "EmployeePortal/Backend/package-lock.json" }}
           paths:
@@ -83,10 +83,10 @@ jobs:
             - v1-deps-CustomerPortal/Backend-{{ checksum "CustomerPortal/Backend/package-lock.json" }}
             - v1-deps-CustomerPortal/Backend-
       - run:
-          name: Install dependencies from package.json
+          name: Install dependencies with legacy peer deps
           command: |
             cd CustomerPortal/Backend
-            npm install
+            npm install --legacy-peer-deps
       - save_cache:
           key: v1-deps-CustomerPortal/Backend-{{ checksum "CustomerPortal/Backend/package-lock.json" }}
           paths:
