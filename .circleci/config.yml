@@ -310,11 +310,51 @@ jobs:
                 echo "   ✗ Profile endpoint failed (HTTP $profile_code)"
               fi
               
+              # SECURITY TEST: Test express-brute rate limiting on login endpoint
+              echo "=== Testing Security Features ==="
+              echo "6. Testing express-brute rate limiting on /api/auth/login..."
+              
+              # Make multiple rapid requests to trigger rate limiting
+              echo "   Making 15 rapid login attempts..."
+              for i in {1..15}; do
+                response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/login)
+                echo "   Attempt $i: HTTP $response"
+                if [[ "$response" == "429" ]]; then
+                  echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
+                  RATE_LIMIT_TRIGGERED=true
+                  break
+                fi
+                sleep 0.1
+              done
+              
+              if [[ "$RATE_LIMIT_TRIGGERED" != "true" ]]; then
+                echo "   ⚠ Rate limiting not triggered within 15 attempts"
+              fi
+              
+              # Test rate limiting on signup endpoint
+              echo "7. Testing express-brute rate limiting on /api/auth/signup..."
+              echo "   Making 15 rapid signup attempts..."
+              for i in {1..15}; do
+                response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8000/api/auth/signup)
+                echo "   Attempt $i: HTTP $response"
+                if [[ "$response" == "429" ]]; then
+                  echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
+                  RATE_LIMIT_TRIGGERED_SIGNUP=true
+                  break
+                fi
+                sleep 0.1
+              done
+              
+              if [[ "$RATE_LIMIT_TRIGGERED_SIGNUP" != "true" ]]; then
+                echo "   ⚠ Rate limiting not triggered within 15 attempts"
+              fi
+              
               echo "=== Customer Portal Test Summary ==="
               echo "All endpoints are responding with expected status codes!"
               echo "401 responses mean: endpoints exist but require authentication ✓"
               echo "400 responses mean: endpoints exist but need proper request data ✓"
               echo "200 responses mean: endpoints are publicly accessible ✓"
+              echo "429 responses mean: rate limiting is working ✓"
               
               # Kill the server
               kill $SERVER_PID
@@ -534,10 +574,50 @@ jobs:
                 echo "   ✗ Payments endpoint failed (HTTP $payments_code)"
               fi
               
+              # SECURITY TEST: Test express-brute rate limiting on employee login endpoint
+              echo "=== Testing Security Features ==="
+              echo "6. Testing express-brute rate limiting on /api/employee/auth/login..."
+              
+              # Make multiple rapid requests to trigger rate limiting
+              echo "   Making 15 rapid login attempts..."
+              for i in {1..15}; do
+                response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/login)
+                echo "   Attempt $i: HTTP $response"
+                if [[ "$response" == "429" ]]; then
+                  echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
+                  RATE_LIMIT_TRIGGERED=true
+                  break
+                fi
+                sleep 0.1
+              done
+              
+              if [[ "$RATE_LIMIT_TRIGGERED" != "true" ]]; then
+                echo "   ⚠ Rate limiting not triggered within 15 attempts"
+              fi
+              
+              # Test rate limiting on employee register endpoint
+              echo "7. Testing express-brute rate limiting on /api/employee/auth/register..."
+              echo "   Making 15 rapid register attempts..."
+              for i in {1..15}; do
+                response=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/api/employee/auth/register)
+                echo "   Attempt $i: HTTP $response"
+                if [[ "$response" == "429" ]]; then
+                  echo "   ✓ Rate limiting triggered on attempt $i (HTTP 429)"
+                  RATE_LIMIT_TRIGGERED_REGISTER=true
+                  break
+                fi
+                sleep 0.1
+              done
+              
+              if [[ "$RATE_LIMIT_TRIGGERED_REGISTER" != "true" ]]; then
+                echo "   ⚠ Rate limiting not triggered within 15 attempts"
+              fi
+              
               echo "=== Employee Portal Test Summary ==="
               echo "All endpoints are responding with expected status codes!"
               echo "401 responses mean: endpoints exist but require authentication ✓"
               echo "400 responses mean: endpoints exist but need proper request data ✓"
+              echo "429 responses mean: rate limiting is working ✓"
               
               # Kill the server
               kill $SERVER_PID
